@@ -12,7 +12,7 @@ from typing import Optional, Dict, List
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from contracts import ScanInput, ScoutOutput, ScoutSignals, ScanType
+from contracts import ScanInput, ScoutOutput
 
 # Initialize Gemini (if available)
 try:
@@ -48,15 +48,15 @@ class ScoutAgent:
             ScoutOutput with risk score and recommendations
         """
         
-        signals = ScoutSignals()
+        signals = {}
         
         # Route to appropriate analysis based on scan type
-        if input_data.scanType == ScanType.MESSAGE:
+        if input_data.scanType == "message":
             signals = await self.analyze_message_text(input_data.content)
-        elif input_data.scanType == ScanType.IMAGE:
+        elif input_data.scanType == "image":
             signals = await self.analyze_image(input_data.image_data)
-        elif input_data.scanType == ScanType.PAGE:
-            signals = await self.extract_page_signals(input_data.url, input_data.page_data)
+        elif input_data.scanType == "page":
+            signals = await self.extract_page_signals(input_data.url)
         
         # Calculate initial risk score
         initial_risk = self.calculate_initial_risk(signals)
@@ -75,7 +75,7 @@ class ScoutAgent:
             predictiveWarning=predictive_warning
         )
     
-    async def analyze_message_text(self, text: str) -> ScoutSignals:
+    async def analyze_message_text(self, text: str) -> Dict:
         """
         Analyze pasted message text for scam indicators
         
@@ -83,9 +83,15 @@ class ScoutAgent:
             text: The message text to analyze
             
         Returns:
-            ScoutSignals with detected patterns
+            Signals dict with detected patterns
         """
-        signals = ScoutSignals()
+        signals = {
+            "urgencyWords": [],
+            "hasPassword": False,
+            "hasEmail": False,
+            "suspiciousPatterns": [],
+            "source": "message"
+        }
         
         if not text:
             return signals
@@ -93,7 +99,7 @@ class ScoutAgent:
         text_lower = text.lower()
         
         # Detect urgency words
-        signals.urgencyWords = [
+        signals["urgencyWords"] = [
             word for word in self.phishing_keywords["urgency"]
             if word in text_lower
         ]
@@ -101,32 +107,32 @@ class ScoutAgent:
         # Detect credential requests
         for cred_word in self.phishing_keywords["credentials"]:
             if cred_word in text_lower:
-                signals.hasPassword = True
+                signals["hasPassword"] = True
                 break
         
         # Detect email patterns
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        signals.hasEmail = bool(re.search(email_pattern, text))
+        signals["hasEmail"] = bool(re.search(email_pattern, text))
         
         # Detect company spoofing attempts
         for company in self.phishing_keywords["company_spoofing"]:
             if company in text_lower:
                 # Check if it's slightly misspelled
                 if self._is_typosquatted(text_lower, company):
-                    signals.suspiciousPatterns.append(f"Possible {company} spoofing")
+                    signals["suspiciousPatterns"].append(f"Possible {company} spoofing")
         
         # Detect too-good-to-be-true offers
         if any(phrase in text_lower for phrase in ["claim prize", "won", "congratulations", "inherited"]):
-            signals.suspiciousPatterns.append("Too-good-to-be-true offer detected")
+            signals["suspiciousPatterns"].append("Too-good-to-be-true offer detected")
         
         # Detect fake attachments mentioned
         for file_ext in self.suspicious_file_types:
             if file_ext in text_lower:
-                signals.suspiciousPatterns.append(f"Suspicious file type: {file_ext}")
+                signals["suspiciousPatterns"].append(f"Suspicious file type: {file_ext}")
         
         return signals
     
-    async def analyze_image(self, image_data: str) -> ScoutSignals:
+    async def analyze_image(self, image_data: str) -> Dict:
         """
         Analyze screenshot using Gemini Vision API
         
@@ -134,9 +140,16 @@ class ScoutAgent:
             image_data: Base64 encoded image data
             
         Returns:
-            ScoutSignals with detected visual elements
+            Signals dict with detected visual elements
         """
-        signals = ScoutSignals()
+        signals = {
+            "hasLogo": False,
+            "logoQuality": "high",
+            "suspiciousImages": False,
+            "extractedText": "",
+            "suspiciousPatterns": [],
+            "source": "image"
+        }
         
         if not image_data or not GEMINI_AVAILABLE:
             return signals
@@ -181,32 +194,36 @@ class ScoutAgent:
             # Parse response
             result = json.loads(response.text)
             
-            signals.hasLogo = result.get("hasLogo", False)
-            signals.logoQuality = result.get("logoQuality", "high")
-            signals.suspiciousImages = result.get("overallAssessment") != "legitimate"
-            signals.extractedText = result.get("extractedText", "")[:500]
-            signals.suspiciousPatterns = result.get("suspiciousElements", [])
+            signals["hasLogo"] = result.get("hasLogo", False)
+            signals["logoQuality"] = result.get("logoQuality", "high")
+            signals["suspiciousImages"] = result.get("overallAssessment") != "legitimate"
+            signals["extractedText"] = result.get("extractedText", "")[:500]
+            signals["suspiciousPatterns"] = result.get("suspiciousElements", [])
             
         except Exception as e:
             print(f"Error analyzing image with Gemini: {e}")
             # Return conservative signals on error
-            signals.suspiciousImages = True
-            signals.logoQuality = "low"
+            signals["suspiciousImages"] = True
+            signals["logoQuality"] = "low"
         
         return signals
     
-    async def extract_page_signals(self, url: str, page_data: Optional[Dict] = None) -> ScoutSignals:
+    async def extract_page_signals(self, url: str) -> Dict:
         """
         Extract signals from web page
         
         Args:
             url: The page URL
-            page_data: DOM signals from content script
             
         Returns:
-            ScoutSignals from page analysis
+            Signals dict from page analysis
         """
-        signals = ScoutSignals()
+        signals = {
+            "domain": None,
+            "hasHTTPS": False,
+            "suspiciousPatterns": [],
+            "source": "page"
+        }
         
         if not url:
             return signals
@@ -215,34 +232,26 @@ class ScoutAgent:
         try:
             from urllib.parse import urlparse
             parsed = urlparse(url)
-            signals.domain = parsed.netloc
-            signals.hasHTTPS = parsed.scheme == 'https'
+            signals["domain"] = parsed.netloc
+            signals["hasHTTPS"] = parsed.scheme == 'https'
         except:
-            signals.domain = url.split('/')[2] if '/' in url else url
-            signals.hasHTTPS = url.startswith('https')
-        
-        # Use page_data if provided (from content script)
-        if page_data:
-            signals.hasPassword = page_data.get("hasPassword", False)
-            signals.hasEmail = page_data.get("hasEmail", False)
-            signals.formCount = page_data.get("formCount", 0)
-            signals.externalLinks = page_data.get("externalLinks", 0)
-            signals.isPrivacyPolicy = page_data.get("isPrivacyPolicy", False)
+            signals["domain"] = url.split('/')[2] if '/' in url else url
+            signals["hasHTTPS"] = url.startswith('https')
         
         # Check for domain spoofing (typosquatting)
         for company in self.phishing_keywords["company_spoofing"]:
-            if company in signals.domain.lower():
-                if self._is_typosquatted(signals.domain.lower(), company):
-                    signals.suspiciousPatterns.append(f"Possible {company} domain spoofing")
+            if company in signals["domain"].lower():
+                if self._is_typosquatted(signals["domain"].lower(), company):
+                    signals["suspiciousPatterns"].append(f"Possible {company} domain spoofing")
         
         return signals
     
-    def calculate_initial_risk(self, signals: ScoutSignals) -> int:
+    def calculate_initial_risk(self, signals: Dict) -> int:
         """
         Calculate 0-100 risk score from signals
         
         Args:
-            signals: ScoutSignals extracted from input
+            signals: Signals dict extracted from input
             
         Returns:
             Risk score 0-100
@@ -250,40 +259,30 @@ class ScoutAgent:
         risk = 0
         
         # Message signals
-        risk += len(signals.urgencyWords) * 10  # Each urgency word adds 10 points
+        risk += len(signals.get("urgencyWords", [])) * 10  # Each urgency word adds 10 points
         
-        if signals.hasPassword:
+        if signals.get("hasPassword"):
             risk += 25  # Credential request is suspicious
         
-        if signals.hasEmail:
+        if signals.get("hasEmail"):
             risk += 10  # Email in suspicious message
         
-        risk += len(signals.suspiciousPatterns) * 15  # Each suspicious pattern
+        risk += len(signals.get("suspiciousPatterns", [])) * 15  # Each suspicious pattern
         
         # Image signals
-        if signals.suspiciousImages:
+        if signals.get("suspiciousImages"):
             risk += 40  # Visual scam indicators are strong signal
         
-        if signals.logoQuality == "low":
+        logo_quality = signals.get("logoQuality", "high")
+        if logo_quality == "low":
             risk += 20
-        elif signals.logoQuality == "medium":
+        elif logo_quality == "medium":
             risk += 10
-        
-        # Page signals
-        if signals.hasPassword and not signals.hasHTTPS:
-            risk += 30  # Password field on non-HTTPS is very dangerous
-        
-        if signals.formCount > 3 and not signals.hasHTTPS:
-            risk += 20  # Many forms on non-HTTPS site
-        
-        if signals.isPrivacyPolicy:
-            risk -= 10  # Privacy policy pages are generally safe
-            risk = max(0, risk)  # Don't go negative
         
         # Cap at 100
         return min(risk, 100)
     
-    def get_recommendation(self, risk_score: int, signals: ScoutSignals) -> str:
+    def get_recommendation(self, risk_score: int, signals: Dict) -> str:
         """
         Determine recommendation based on risk score and signals
         
@@ -295,10 +294,8 @@ class ScoutAgent:
             Recommendation string
         """
         if risk_score > 70:
-            return "BLOCK_IMMEDIATELY"
-        elif risk_score > 40:
-            return "ESCALATE_TO_ANALYST"
-        elif risk_score > 20:
+            return "BLOCK"
+        elif risk_score > 30:
             return "ESCALATE_TO_ANALYST"
         else:
             return "SAFE"
@@ -374,14 +371,14 @@ async def main():
     
     input1 = ScanInput(
         url="",
-        scanType=ScanType.MESSAGE,
+        scanType="message",
         content=phishing_msg
     )
     
     result1 = await scout.analyze(input1)
     print(f"Risk Score: {result1.initialRisk}/100")
     print(f"Recommendation: {result1.recommendation}")
-    print(f"Signals: {result1.signals.dict()}")
+    print(f"Signals: {result1.signals}")
     print(f"Predictive Warning: {result1.predictiveWarning}")
     print()
     
@@ -391,14 +388,7 @@ async def main():
     
     input2 = ScanInput(
         url="https://www.paypal.com/login",
-        scanType=ScanType.PAGE,
-        page_data={
-            "hasPassword": True,
-            "hasEmail": True,
-            "formCount": 1,
-            "externalLinks": 5,
-            "isPrivacyPolicy": False
-        }
+        scanType="page"
     )
     
     result2 = await scout.analyze(input2)
@@ -412,20 +402,13 @@ async def main():
     
     input3 = ScanInput(
         url="https://paypa1-security.com/verify",
-        scanType=ScanType.PAGE,
-        page_data={
-            "hasPassword": True,
-            "hasEmail": True,
-            "formCount": 1,
-            "externalLinks": 20,
-            "isPrivacyPolicy": False
-        }
+        scanType="page"
     )
     
     result3 = await scout.analyze(input3)
     print(f"Risk Score: {result3.initialRisk}/100")
     print(f"Recommendation: {result3.recommendation}")
-    print(f"Signals: {result3.signals.dict()}")
+    print(f"Signals: {result3.signals}")
 
 
 if __name__ == "__main__":

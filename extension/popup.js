@@ -129,7 +129,7 @@ function displayResults(container, result) {
   if (result.recommendation === 'ESCALATE_TO_ANALYST') {
     recommendation = 'This needs human review';
     recommendationClass = risk > 50 ? 'danger' : 'caution';
-  } else if (result.recommendation === 'BLOCK_IMMEDIATELY') {
+  } else if (result.recommendation === 'BLOCK') {
     recommendation = 'Do not proceed with this';
     recommendationClass = 'danger';
   }
@@ -194,7 +194,7 @@ function displayResults(container, result) {
       <div class="risk-label">Risk Score</div>
     </div>
     <div class="recommendation-box ${recommendationClass}">
-      <strong>${result.recommendation === 'BLOCK_IMMEDIATELY' ? '🚨' : recommendation === 'Safe to proceed' ? '✅' : '⚠️'} ${recommendation}</strong>
+      <strong>${result.recommendation === 'BLOCK' ? '🚨' : recommendation === 'Safe to proceed' ? '✅' : '⚠️'} ${recommendation}</strong>
       <p>Based on: ${result.scanType} analysis</p>
     </div>
     ${signalsHtml}
