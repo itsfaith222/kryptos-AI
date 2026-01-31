@@ -34,11 +34,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage for scan results (replace with MongoDB later)
+# In-memory storage for scan results
 scan_history: Dict[str, ScanResult] = {}
+scan_log: List[Dict] = []  # Simple in-memory log for now
 
 
 # ============= SCOUT ENDPOINTS =============
+
+@app.post("/api/scout/scan")
+async def api_scout_scan(request: Dict) -> Dict:
+    """
+    API endpoint for Chrome extension
+    Simplified endpoint that returns riskScore
+    
+    Args:
+        request: Dict with url, signals, hasLoginForm
+        
+    Returns:
+        Dict with riskScore
+    """
+    try:
+        url = request.get('url', '')
+        signals = request.get('signals', [])
+        has_login = request.get('hasLoginForm', False)
+        
+        # Hardcoded logic as per requirements
+        risk_score = 10  # Default low risk
+        
+        # If URL contains 'login' or signals contain 'urgent', return 85
+        if 'login' in url.lower() or any('urgent' in s.lower() for s in signals):
+            risk_score = 85
+        
+        # Log scan in memory
+        scan_log.append({
+            'url': url,
+            'signals': signals,
+            'riskScore': risk_score,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        return {
+            'riskScore': risk_score,
+            'url': url,
+            'signals': signals,
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"Error in API scout scan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/scout/analyze")
 async def scout_analyze(input_data: ScanInput) -> ScoutOutput:
