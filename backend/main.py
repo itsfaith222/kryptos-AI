@@ -15,7 +15,7 @@ import os
 # Add agents to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from contracts import ScanInput, ScoutOutput, AnalystOutput, EducatorOutput, ScanResult
+from contracts import ScanInput, ScoutInput, ScoutOutput, AnalystOutput, EducatorOutput, ScanResult
 from agents.scout import scout
 
 # Initialize FastAPI app
@@ -42,41 +42,66 @@ scan_log: List[Dict] = []  # Simple in-memory log for now
 # ============= SCOUT ENDPOINTS =============
 
 @app.post("/api/scout/scan")
-async def api_scout_scan(request: Dict) -> Dict:
+async def api_scout_scan(input_data: ScoutInput) -> Dict:
     """
-    API endpoint for Chrome extension
-    Simplified endpoint that returns riskScore
+    Scout scan endpoint for Chrome extension
     
     Args:
-        request: Dict with url, signals, hasLoginForm
+        input_data: ScoutInput with url, is_login_page, detected_keywords, pasted_text
         
     Returns:
-        Dict with riskScore
+        Dict with risk_score and warning_message
     """
     try:
-        url = request.get('url', '')
-        signals = request.get('signals', [])
-        has_login = request.get('hasLoginForm', False)
+        url = input_data.url
+        is_login_page = input_data.is_login_page
+        detected_keywords = input_data.detected_keywords
+        pasted_text = input_data.pasted_text or ""
         
-        # Hardcoded logic as per requirements
+        # Phishing keywords to check
+        phishing_terms = ['urgent', 'verify', 'suspended', 'login', 'action required', 
+                         'confirm', 'update', 'security alert', 'immediate']
+        
+        # Calculate risk score
         risk_score = 10  # Default low risk
+        warning_message = "✅ This page appears safe"
         
-        # If URL contains 'login' or signals contain 'urgent', return 85
-        if 'login' in url.lower() or any('urgent' in s.lower() for s in signals):
+        # Check if login page
+        if is_login_page:
             risk_score = 85
+            warning_message = "🚨 Login page detected - verify the URL is correct"
         
-        # Log scan in memory
+        # Check for phishing keywords in detected_keywords
+        found_phishing = [kw for kw in detected_keywords if any(term in kw.lower() for term in phishing_terms)]
+        if found_phishing:
+            risk_score = max(risk_score, 75)  # At least 75 for phishing keywords
+            warning_message = f"⚠️ Phishing indicators detected: {', '.join(found_phishing)}"
+        
+        # Check pasted text for phishing keywords
+        if pasted_text:
+            pasted_lower = pasted_text.lower()
+            for term in phishing_terms:
+                if term in pasted_lower:
+                    risk_score = max(risk_score, 75)
+                    warning_message = f"⚠️ Suspicious text detected: '{term}' found in message"
+                    break
+        
+        # Log scan
         scan_log.append({
             'url': url,
-            'signals': signals,
-            'riskScore': risk_score,
+            'is_login_page': is_login_page,
+            'detected_keywords': detected_keywords,
+            'risk_score': risk_score,
+            'warning_message': warning_message,
             'timestamp': datetime.now().isoformat()
         })
         
+        print(f"Scout scan: {url} → Risk {risk_score}/100")
+        
         return {
-            'riskScore': risk_score,
+            'risk_score': risk_score,
+            'warning_message': warning_message,
             'url': url,
-            'signals': signals,
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:

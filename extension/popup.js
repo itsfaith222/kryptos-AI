@@ -1,18 +1,25 @@
 /**
  * Scout - Popup Logic
+ * Handles user interactions and result display
  */
 
 const BACKEND_URL = 'http://localhost:8000';
+
+console.log('[Scout] Popup script loaded');
 
 // DOM Elements
 const pasteInput = document.getElementById('paste-input');
 const analyzeBtn = document.getElementById('analyze-btn');
 const pasteResult = document.getElementById('paste-result');
+const imageInput = document.getElementById('image-input');
+const uploadBtn = document.getElementById('upload-btn');
+const imageResult = document.getElementById('image-result');
 const pageResult = document.getElementById('page-result');
 const currentPageEl = document.getElementById('current-page');
 const statusMessage = document.getElementById('status-message');
 
-// Analyze button handler
+// ============= PASTE ANALYSIS =============
+
 analyzeBtn.addEventListener('click', async () => {
   const text = pasteInput.value.trim();
   
@@ -26,7 +33,7 @@ analyzeBtn.addEventListener('click', async () => {
   pasteResult.innerHTML = '<div class="loading"></div> Analyzing...';
   
   try {
-    const result = await sendToBackend(text);
+    const result = await analyzePastedText(text);
     displayResult(pasteResult, result);
     showStatus('Analysis complete', 'success');
   } catch (error) {
@@ -38,16 +45,60 @@ analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-// Send text to backend
-async function sendToBackend(text) {
+// ============= IMAGE UPLOAD =============
+
+uploadBtn.addEventListener('click', async () => {
+  const file = imageInput.files[0];
+  
+  if (!file) {
+    showStatus('Please select an image file', 'error');
+    return;
+  }
+  
+  if (!file.type.startsWith('image/')) {
+    showStatus('Please select a valid image file', 'error');
+    return;
+  }
+  
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = 'Analyzing...';
+  imageResult.innerHTML = '<div class="loading"></div> Analyzing screenshot...';
+  
+  try {
+    const base64 = await fileToBase64(file);
+    const result = await analyzeScreenshot(base64);
+    displayResult(imageResult, result);
+    showStatus('Screenshot analysis complete', 'success');
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+    imageResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+  } finally {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Analyze Screenshot';
+  }
+});
+
+// ============= FUNCTIONS =============
+
+/**
+ * Analyze pasted text
+ */
+async function analyzePastedText(text) {
+  console.log('[Scout] Analyzing pasted text');
+  
+  const payload = {
+    url: '',
+    is_login_page: false,
+    detected_keywords: extractPhishingKeywords(text),
+    pasted_text: text
+  };
+  
+  console.log('[Scout] Payload:', payload);
+  
   const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url: '',
-      signals: extractSignals(text),
-      hasLoginForm: false
-    })
+    body: JSON.stringify(payload)
   });
   
   if (!response.ok) {
@@ -57,21 +108,67 @@ async function sendToBackend(text) {
   return await response.json();
 }
 
-// Extract urgency signals
-function extractSignals(text) {
-  const urgencyKeywords = [
-    'urgent', 'immediate', 'action required', 'verify', 'confirm',
-    'suspended', 'locked', 'expires', 'limited time', 'act now',
-    'click here', 'update required', 'security alert', 'unusual activity'
+/**
+ * Analyze screenshot (placeholder - would use Gemini Vision in full implementation)
+ */
+async function analyzeScreenshot(base64) {
+  console.log('[Scout] Analyzing screenshot');
+  
+  // For now, treat screenshot like text analysis
+  // In full implementation, would send to Gemini Vision API
+  const payload = {
+    url: '',
+    is_login_page: false,
+    detected_keywords: ['screenshot-uploaded'],
+    pasted_text: null
+  };
+  
+  const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Backend error: ${response.status}`);
+  }
+  
+  return await response.json();
+}
+
+/**
+ * Extract phishing keywords from text
+ */
+function extractPhishingKeywords(text) {
+  const phishingKeywords = [
+    'urgent', 'action required', 'suspended', 'verify', 'security alert',
+    'confirm', 'update', 'immediate', 'click here', 'limited time'
   ];
   
   const textLower = text.toLowerCase();
-  return urgencyKeywords.filter(keyword => textLower.includes(keyword));
+  return phishingKeywords.filter(keyword => textLower.includes(keyword));
 }
 
-// Display result
+/**
+ * Convert file to base64
+ */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Display result
+ */
 function displayResult(container, result) {
-  const risk = result.riskScore || 0;
+  const risk = result.risk_score || 0;
   let riskColor = 'green';
   let riskEmoji = '✅';
   
@@ -90,10 +187,8 @@ function displayResult(container, result) {
         <span class="score">${risk}/100</span>
       </div>
       <div class="risk-label">Risk Score</div>
-      <div class="recommendation">
-        ${risk > 70 ? '🚨 High Risk - Do not proceed' : 
-          risk >= 40 ? '⚠️ Medium Risk - Be cautious' : 
-          '✅ Low Risk - Appears safe'}
+      <div class="warning-message">
+        ${result.warning_message || 'Analysis complete'}
       </div>
     </div>
   `;
@@ -101,7 +196,9 @@ function displayResult(container, result) {
   container.innerHTML = html;
 }
 
-// Show status message
+/**
+ * Show status message
+ */
 function showStatus(message, type = 'info') {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${type}`;
@@ -114,7 +211,9 @@ function showStatus(message, type = 'info') {
   }
 }
 
-// Load current page status
+/**
+ * Load current page status
+ */
 async function loadCurrentPageStatus() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -122,14 +221,17 @@ async function loadCurrentPageStatus() {
     
     const hasLogin = tab.url.toLowerCase().includes('login');
     
+    const payload = {
+      url: tab.url,
+      is_login_page: hasLogin,
+      detected_keywords: [],
+      pasted_text: null
+    };
+    
     const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: tab.url,
-        signals: [],
-        hasLoginForm: hasLogin
-      })
+      body: JSON.stringify(payload)
     });
     
     if (response.ok) {
@@ -137,6 +239,7 @@ async function loadCurrentPageStatus() {
       displayResult(pageResult, result);
     }
   } catch (error) {
+    console.error('[Scout] Error loading page status:', error);
     currentPageEl.textContent = 'Unable to analyze current page';
     pageResult.innerHTML = `<div class="error">Backend unavailable</div>`;
   }

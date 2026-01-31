@@ -5,12 +5,20 @@ from typing import Optional, List, Dict
 from pydantic import BaseModel
 
 
-# Input to Scout
+# Input to Scout (original format)
 class ScanInput(BaseModel):
     url: str
     scanType: str  # "page" | "email" | "message" | "image"
     content: Optional[str] = None
     image_data: Optional[str] = None  # base64 for screenshots
+
+
+# Input to Scout (Chrome extension format)
+class ScoutInput(BaseModel):
+    url: str
+    is_login_page: bool
+    detected_keywords: List[str]
+    pasted_text: Optional[str] = None
 
 
 # Output from Scout -> Input to Analyst
