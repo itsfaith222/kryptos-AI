@@ -2,7 +2,7 @@
 GUARDIAN AI - ANALYST AGENT
 Person B's Main Hub
 
-HOUR 1-2: Basic structure with mock data
+HOUR 2-4: With Gemini AI
 """
 
 import os
@@ -10,96 +10,66 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
+try:
+    from .gemini_analyzer import GeminiAnalyzer
+except ImportError:
+    from gemini_analyzer import GeminiAnalyzer
+
 
 class AnalystAgent:
-    """
-    The Analyst Agent - Guardian AI's Deep Investigator
-    
-    ORCHESTRATOR CALLS:
-        analyst = AnalystAgent(db)
-        result = await analyst.analyze_threat(scout_data)
-    """
+    """The Analyst Agent - Guardian AI's Deep Investigator"""
     
     def __init__(self, db=None):
-        """
-        Initialize Analyst Agent
-        
-        Args:
-            db: MongoDB database instance (provided by Orchestrator)
-        """
+        """Initialize Analyst Agent"""
         self.db = db
-        print("[ANALYST] 🔍 Hour 1-2: Basic Analyst initialized")
+        self.gemini = GeminiAnalyzer()  # MUST HAVE THIS LINE
+        print("[ANALYST] 🔍 Hour 2-4: Analyst with Gemini AI")
+        print(f"[ANALYST] Gemini: {'✓' if self.gemini.available else '✗'}")
         print(f"[ANALYST] MongoDB: {'✓' if db else '✗ (standalone mode)'}")
-    
+        
     async def analyze_threat(self, scout_data: Dict) -> Dict:
-        """
-        MAIN ENTRY POINT - Orchestrator calls this
-        
-        Input (from Scout via Orchestrator):
-        {
-            "url": "https://suspicious-site.com",
-            "content": "page text",
-            "scanType": "webpage",
-            "signals": {
-                "hasPassword": true,
-                "urgencyWords": ["urgent"],
-                "sslValid": false
-            }
-        }
-        
-        Output (to Orchestrator/Educator):
-        {
-            "analysisId": "uuid",
-            "threatType": "phishing",
-            "riskScore": 87,
-            "confidence": 0.92,
-            "evidence": [...],
-            "explanation": "...",
-            "nextSteps": [...]
-        }
-        """
         analysis_id = str(uuid.uuid4())
         
         print(f"\n[ANALYST] ========================================")
         print(f"[ANALYST] 🔍 Analysis {analysis_id[:8]}")
         print(f"[ANALYST] ========================================")
         
-        # Extract Scout data
         url = scout_data.get('url', '')
         content = scout_data.get('content', '')
         scan_type = scout_data.get('scanType', 'webpage')
         signals = scout_data.get('signals', {})
         
         print(f"[ANALYST] URL: {url}")
-        print(f"[ANALYST] Type: {scan_type}")
+        print(f"[ANALYST] Using Gemini: {self.gemini.available}")
         
-        # HOUR 1-2: Simple rule-based scoring
-        risk_score = self._calculate_basic_risk(content, signals)
-        evidence = self._extract_basic_evidence(signals)
-        next_steps = self._generate_next_steps(risk_score)
+        # HOUR 2-4: Use Gemini AI
+        gemini_result = self.gemini.analyze_threat(content, url)
         
-        # Determine threat type
-        if risk_score >= 70:
-            threat_type = "phishing"
-        elif risk_score >= 40:
-            threat_type = "scam"
-        else:
-            threat_type = "benign"
+        base_risk = gemini_result.get('riskScore', 50)
         
-        print(f"[ANALYST] Risk: {risk_score}/100")
-        print(f"[ANALYST] Type: {threat_type}")
+        # Add Scout signals to risk
+        if signals.get('hasPassword'):
+            base_risk += 10
+        if not signals.get('sslValid', True):
+            base_risk += 10
+        
+        final_risk = min(base_risk, 100)
+        
+        print(f"[ANALYST] Risk: {final_risk}/100")
+        print(f"[ANALYST] Tactics: {len(gemini_result.get('manipulationTactics', []))}")
         print(f"[ANALYST] ========================================\n")
         
         return {
             "analysisId": analysis_id,
             "timestamp": datetime.utcnow().isoformat(),
             "url": url,
-            "threatType": threat_type,
-            "riskScore": risk_score,
-            "confidence": 0.7,
-            "evidence": evidence,
-            "explanation": f"Detected as {threat_type} using rule-based analysis.",
-            "nextSteps": next_steps,
+            "threatType": gemini_result.get('threatType', 'unknown'),
+            "riskScore": final_risk,
+            "confidence": gemini_result.get('confidence', 0.5),
+            "manipulationTactics": gemini_result.get('manipulationTactics', []),
+            "evidence": gemini_result.get('evidence', []),
+            "explanation": gemini_result.get('explanation', ''),
+            "nextSteps": self._generate_next_steps(final_risk),
             "scanType": scan_type
         }
     
@@ -177,47 +147,46 @@ class AnalystAgent:
 # STANDALONE TESTING
 # ==========================================
 
-async def test_hour_1_2():
-    """Test Hour 1-2: Basic analyst"""
+async def test_hour_2_4():
+    """Test Hour 2-4: Gemini AI integration"""
     print("="*60)
-    print("🧪 TESTING HOUR 1-2: Basic Analyst")
+    print("🧪 TESTING HOUR 2-4: Gemini AI")
     print("="*60)
     
-    # Mock scout data
     scout_data = {
         "url": "https://paypa1-security.com/verify",
-        "content": "URGENT: Verify your account!",
-        "scanType": "webpage",
+        "content": """
+        URGENT: Your PayPal Account Has Been Suspended
+        
+        We detected unusual activity. Click here within 24 hours
+        or your account will be permanently closed.
+        
+        Enter your password to verify.
+        """,
+        "scanType": "email",
         "signals": {
             "hasPassword": True,
-            "urgencyWords": ["urgent", "verify"],
+            "urgencyWords": ["urgent", "suspended"],
             "sslValid": False
         }
     }
     
-    # Create analyst (no DB yet)
     analyst = AnalystAgent(db=None)
-    
-    # Run analysis
     result = await analyst.analyze_threat(scout_data)
     
-    # Display
     print("\n" + "="*60)
     print("📊 RESULTS")
     print("="*60)
-    print(f"Analysis ID: {result['analysisId'][:8]}...")
-    print(f"Threat Type: {result['threatType']}")
-    print(f"Risk Score: {result['riskScore']}/100")
-    print(f"\nEvidence ({len(result['evidence'])} items):")
-    for e in result['evidence']:
-        print(f"  • [{e['severity']}] {e['finding']}")
-    print(f"\nNext Steps:")
-    for i, step in enumerate(result['nextSteps'], 1):
-        print(f"  {i}. {step}")
+    print(f"Threat: {result['threatType']}")
+    print(f"Risk: {result['riskScore']}/100")
+    print(f"Confidence: {result['confidence']:.0%}")
+    print(f"\nManipulation Tactics:")
+    for tactic in result['manipulationTactics']:
+        print(f"  • {tactic['type']}: {tactic['example']}")
     print("="*60)
-    print("✅ HOUR 1-2 COMPLETE!")
+    print("✅ HOUR 2-4 COMPLETE!")
 
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(test_hour_1_2())
+    asyncio.run(test_hour_2_4())
