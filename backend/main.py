@@ -4,7 +4,11 @@ Orchestrator - Person D: FastAPI server, /scan endpoint, agent coordination
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
+
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,12 +22,17 @@ from contracts import (
     EducatorOutput,
 )
 
-from dotenv import load_dotenv
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=APP_NAME or "Guardian AI")
+
+
+@app.on_event("startup")
+async def startup():
+    """Log MongoDB config on startup so you can verify in terminal."""
+    uri = os.getenv("MONGODB_URI", "")
+    has_uri = bool(uri and uri != "mongodb://localhost:27017")
+    print(f"\n[Guardian AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
 
 # CORS
 _cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
@@ -159,6 +168,7 @@ async def scan_endpoint(input_data: ScanInput):
         from database import save_scan
         await save_scan(result.model_dump())
     except Exception as e:
-        logger.warning("Could not save scan to database: %s", e)
+        logger.exception("Could not save scan to database")
+        print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
 
     return result.model_dump()
