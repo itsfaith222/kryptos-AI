@@ -1,415 +1,174 @@
 """
-Guardian AI Backend Server
-FastAPI server that orchestrates Scout, Analyst, and Educator agents
+Orchestrator - Person D: FastAPI server, /scan endpoint, agent coordination
 """
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List, Dict
-import uuid
-from datetime import datetime
-import sys
+import logging
 import os
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
-# Add agents to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from contracts import ScanInput, ScoutOutput, AnalystOutput, EducatorOutput, ScanResult
-from agents.scout import scout, compute_risk_from_signal
-from database import save_scan as db_save_scan
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Guardian AI",
-    description="Real-time protection from scams and privacy violations",
-    version="1.0.0"
+from config import APP_NAME
+from contracts import (
+    ScanInput,
+    ScanResult,
+    ScoutOutput,
+    AnalystOutput,
+    EducatorOutput,
 )
 
-# Enable CORS for Chrome extension
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title=APP_NAME or "Guardian AI")
+
+
+@app.on_event("startup")
+async def startup():
+    """Log MongoDB config on startup so you can verify in terminal."""
+    uri = os.getenv("MONGODB_URI", "")
+    has_uri = bool(uri and uri != "mongodb://localhost:27017")
+    print(f"\n[Guardian AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
+
+# CORS
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+CORS_ORIGINS = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for extension
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# In-memory storage for scan results
-scan_history: Dict[str, ScanResult] = {}
-scan_log: List[Dict] = []  # Simple in-memory log for now
+
+# --- Mock agent outputs (used until Person A/B/C implement real agents) ---
+
+def _is_high_risk(input_data: ScanInput) -> bool:
+    content = (input_data.content or "").lower()
+    return "urgent" in content or "verify" in content
 
 
-# ============= SCOUT ENDPOINTS =============
+def _mock_scout(input_data: ScanInput) -> ScoutOutput:
+    high_risk = _is_high_risk(input_data)
+    return ScoutOutput(
+        scanType=input_data.scanType,
+        initialRisk=80 if high_risk else 20,
+        signals={"hasPassword": high_risk, "urgencyWords": ["urgent", "verify"] if high_risk else []},
+        recommendation="ESCALATE_TO_ANALYST" if high_risk else "SAFE",
+        predictiveWarning="Fake phishing scams trending" if high_risk else None,
+    )
 
-@app.post("/api/scout/scan")
-async def api_scout_scan(request: Dict) -> Dict:
-    """
-    API endpoint for Chrome extension (SCOUT_SIGNAL payload).
-    Computes risk from url, isLogin, hasPrivacyPolicy, detectedKeywords.
-    Persists scan to MongoDB when available.
-    """
+
+def _mock_analyst(scout_result: ScoutOutput) -> AnalystOutput:
+    high_risk = scout_result.recommendation == "ESCALATE_TO_ANALYST"
+    return AnalystOutput(
+        analysisId=str(uuid4()),
+        threatType="phishing" if high_risk else "safe",
+        riskScore=scout_result.initialRisk,
+        confidence=0.92 if high_risk else 0.60,
+        evidence=[
+            {"type": "mock", "finding": "Urgency triggers detected", "weight": 0.8, "severity": "high"}
+        ] if high_risk else [],
+        mitreAttackTechniques=["T1566.002"] if high_risk else [],
+    )
+
+
+def _mock_educator(analyst_result: AnalystOutput) -> EducatorOutput:
+    high_risk = analyst_result.threatType != "safe"
+    return EducatorOutput(
+        explanation=(
+            "Potential phishing indicators detected. Avoid clicking links."
+            if high_risk
+            else "Content appears safe. No urgent or verify triggers found."
+        ),
+        nextSteps=(
+            ["Do not click links", "Verify sender identity", "Report if suspicious"]
+            if high_risk
+            else ["Proceed with caution", "Verify sender if unsure"]
+        ),
+        learningPoints=["Watch for urgency words", "Check sender address"] if high_risk else [],
+        voiceAlert=None,
+    )
+
+
+# --- Pipeline: Scout → Analyst → Educator → ScanResult ---
+
+async def _run_scout(input_data: ScanInput) -> ScoutOutput:
     try:
-        url = request.get("url", "")
-        is_login = request.get("isLogin", False)
-        has_privacy_policy = request.get("hasPrivacyPolicy", False)
-        detected_keywords = request.get("detectedKeywords", [])
-        detected_scam = request.get("detectedScam", [])
-        detected_malware = request.get("detectedMalware", [])
-        # Legacy shape from extension
-        if detected_keywords == [] and "signals" in request:
-            detected_keywords = request.get("signals", [])
-
-        result = compute_risk_from_signal(
-            url=url,
-            is_login=is_login,
-            has_privacy_policy=has_privacy_policy,
-            detected_keywords=detected_keywords,
-            detected_scam=detected_scam,
-            detected_malware=detected_malware,
-        )
-        risk_score = result["risk_score"]
-        metadata = result.get("metadata", {})
-
-        # Persist to MongoDB (async-safe: runs in thread pool)
-        scan_id = db_save_scan(
-            url=url or "(paste)",
-            score=risk_score,
-            metadata={
-                "isLogin": is_login,
-                "hasPrivacyPolicy": has_privacy_policy,
-                "detectedKeywords": detected_keywords,
-                "detectedScam": detected_scam,
-                "detectedMalware": detected_malware,
-            },
-        )
-        if scan_id:
-            metadata["scanId"] = scan_id
-
-        scan_log.append({
-            "url": url,
-            "riskScore": risk_score,
-            "timestamp": datetime.now().isoformat(),
-            **metadata,
-        })
-
-        return {
-            "riskScore": risk_score,
-            "url": url,
-            "hasPrivacyPolicy": has_privacy_policy,
-            "detectedKeywords": detected_keywords,
-            "timestamp": datetime.now().isoformat(),
-            "metadata": metadata,
-        }
-    except Exception as e:
-        print(f"Error in API scout scan: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        from agents.scout import analyze
+        return await analyze(input_data)
+    except (ImportError, AttributeError) as e:
+        logger.debug("Using mock Scout: %s", e)
+        return _mock_scout(input_data)
 
 
-@app.post("/scout/analyze")
-async def scout_analyze(input_data: ScanInput) -> ScoutOutput:
-    """
-    Analyze input with Scout agent
-    
-    Args:
-        input_data: ScanInput with url, scanType, and content
-        
-    Returns:
-        ScoutOutput with risk score and signals
-    """
+async def _run_analyst(scout_result: ScoutOutput) -> AnalystOutput:
     try:
-        result = await scout.analyze(input_data)
-        return result
-    except Exception as e:
-        print(f"Error in scout analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        from agents.analyst import investigate
+        return await investigate(scout_result)
+    except (ImportError, AttributeError) as e:
+        logger.debug("Using mock Analyst: %s", e)
+        return _mock_analyst(scout_result)
 
 
-@app.get("/scout/warnings")
-async def scout_warnings() -> List[Dict]:
-    """
-    Get predictive warnings about trending threats
-    
-    Returns:
-        List of threat warnings
-    """
+async def _run_educator(analyst_result: AnalystOutput) -> EducatorOutput:
     try:
-        # Mock warnings - will integrate with MongoDB later
-        warnings = [
-            {
-                "threatType": "Phishing",
-                "description": "PayPal phishing emails up 300% this week",
-                "severity": "high"
-            },
-            {
-                "threatType": "Scam",
-                "description": "Amazon package delivery scams trending",
-                "severity": "medium"
-            },
-            {
-                "threatType": "Malware",
-                "description": "Fake Chrome extension downloads detected",
-                "severity": "high"
-            }
-        ]
-        return warnings
-    except Exception as e:
-        print(f"Error fetching warnings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        from agents.educator import explain
+        return await explain(analyst_result)
+    except (ImportError, AttributeError) as e:
+        logger.debug("Using mock Educator: %s", e)
+        return _mock_educator(analyst_result)
 
 
-# ============= ANALYST ENDPOINTS =============
+def _assemble_scan_result(
+    input_data: ScanInput,
+    analyst_result: AnalystOutput,
+    educator_result: EducatorOutput,
+) -> ScanResult:
+    return ScanResult(
+        scanId=str(uuid4()),
+        timestamp=datetime.utcnow().isoformat(),
+        url=input_data.url,
+        scanType=input_data.scanType,
+        riskScore=analyst_result.riskScore,
+        threatType=analyst_result.threatType,
+        confidence=analyst_result.confidence,
+        evidence=analyst_result.evidence,
+        explanation=educator_result.explanation,
+        nextSteps=educator_result.nextSteps,
+        mitreAttackTechniques=analyst_result.mitreAttackTechniques,
+    )
 
-@app.post("/analyst/analyze")
-async def analyst_analyze(scout_output: ScoutOutput) -> AnalystOutput:
-    """
-    Deep analysis by Analyst agent
-    
-    Args:
-        scout_output: Output from Scout agent
-        
-    Returns:
-        AnalystOutput with detailed threat analysis
-    """
-    try:
-        # Determine threat type based on signals and risk
-        threat_type = "unknown"
-        signals = scout_output.signals
-        
-        # Check for phishing indicators
-        if signals.get("urgencyWords") or signals.get("hasPassword"):
-            threat_type = "phishing"
-        # Check for scam indicators
-        elif signals.get("suspiciousPatterns"):
-            threat_type = "scam"
-        # Check for privacy violations
-        elif signals.get("isPrivacyPolicy"):
-            threat_type = "privacy_violation"
-        # Fallback to risk-based classification
-        elif scout_output.initialRisk > 70:
-            threat_type = "phishing"
-        elif scout_output.initialRisk > 40:
-            threat_type = "scam"
-        elif scout_output.initialRisk > 20:
-            threat_type = "privacy_violation"
-        
-        result = AnalystOutput(
-            analysisId=str(uuid.uuid4()),
-            threatType=threat_type,
-            riskScore=scout_output.initialRisk,
-            confidence=0.85,
-            evidence=[
-                {"type": "signal", "value": signal}
-                for signal in scout_output.signals.get("suspiciousPatterns", [])
-            ],
-            mitreAttackTechniques=["T1566.002", "T1598.003"]  # Phishing techniques
-        )
-        return result
-    except Exception as e:
-        print(f"Error in analyst analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/analyst/analyze-privacy")
-async def analyze_privacy_policy(policy_text: str) -> Dict:
-    """
-    Analyze privacy policy text
-    
-    Args:
-        policy_text: Full privacy policy text
-        
-    Returns:
-        Analysis results
-    """
-    try:
-        # Mock privacy analysis - will implement real agent later
-        return {
-            "riskScore": 45,
-            "dataCollected": ["email", "location", "browsing_history"],
-            "thirdPartySharing": True,
-            "recommendation": "Review before using"
-        }
-    except Exception as e:
-        print(f"Error analyzing privacy policy: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============= EDUCATOR ENDPOINTS =============
-
-@app.post("/educator/explain")
-async def educator_explain(analyst_output: AnalystOutput) -> EducatorOutput:
-    """
-    Generate educational content about the threat
-    
-    Args:
-        analyst_output: Output from Analyst agent
-        
-    Returns:
-        EducatorOutput with explanation and tips
-    """
-    try:
-        # Mock educator response - will implement real agent later
-        explanations = {
-            "phishing": "This appears to be a phishing attempt trying to steal your credentials.",
-            "scam": "This looks like a scam trying to trick you into sending money or personal info.",
-            "malware": "This may contain malware that could harm your device.",
-            "privacy_violation": "This site may be collecting more data than necessary."
-        }
-        
-        tips = {
-            "phishing": [
-                "Never click links in suspicious emails",
-                "Verify the sender's email address carefully",
-                "Check for spelling errors and poor formatting",
-                "Hover over links to see the real URL"
-            ],
-            "scam": [
-                "Be skeptical of urgent requests",
-                "Verify requests through official channels",
-                "Never send money to unknown sources",
-                "Check for too-good-to-be-true offers"
-            ],
-            "malware": [
-                "Keep your antivirus software updated",
-                "Don't download from untrusted sources",
-                "Be careful with email attachments",
-                "Use strong, unique passwords"
-            ]
-        }
-        
-        threat_type = analyst_output.threatType
-        result = EducatorOutput(
-            explanation=explanations.get(threat_type, "Unknown threat type"),
-            nextSteps=[
-                "Report this to the platform",
-                "Block the sender",
-                "Delete the message"
-            ],
-            learningPoints=tips.get(threat_type, []),
-            voiceAlert=None  # Will implement voice alerts later
-        )
-        return result
-    except Exception as e:
-        print(f"Error in educator explanation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============= ORCHESTRATION ENDPOINTS =============
-
-@app.post("/scan")
-async def full_scan(input_data: ScanInput) -> ScanResult:
-    """
-    Full scan pipeline: Scout → Analyst → Educator
-    
-    Args:
-        input_data: ScanInput with url, scanType, and content
-        
-    Returns:
-        Complete ScanResult with all analysis
-    """
-    try:
-        # Step 1: Scout analysis
-        scout_result = await scout_analyze(input_data)
-        
-        # Step 2: Analyst deep dive
-        analyst_result = await analyst_analyze(scout_result)
-        
-        # Step 3: Educator explanation
-        educator_result = await educator_explain(analyst_result)
-        
-        # Step 4: Assemble final result
-        scan_id = str(uuid.uuid4())
-        final_result = ScanResult(
-            scanId=scan_id,
-            timestamp=datetime.now().isoformat(),
-            url=input_data.url or "unknown",
-            scanType=input_data.scanType,
-            riskScore=analyst_result.riskScore,
-            threatType=analyst_result.threatType,
-            confidence=analyst_result.confidence,
-            evidence=analyst_result.evidence,
-            explanation=educator_result.explanation,
-            nextSteps=educator_result.nextSteps,
-            mitreAttackTechniques=analyst_result.mitreAttackTechniques
-        )
-        
-        # Store in history
-        scan_history[scan_id] = final_result
-        
-        return final_result
-    except Exception as e:
-        print(f"Error in full scan: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/scan/{scan_id}")
-async def get_scan(scan_id: str) -> ScanResult:
-    """
-    Retrieve a previous scan result
-    
-    Args:
-        scan_id: ID of the scan to retrieve
-        
-    Returns:
-        ScanResult from history
-    """
-    if scan_id not in scan_history:
-        raise HTTPException(status_code=404, detail="Scan not found")
-    
-    return scan_history[scan_id]
-
-
-@app.get("/scan/history")
-async def get_scan_history() -> List[ScanResult]:
-    """
-    Get all scan history
-    
-    Returns:
-        List of all ScanResults
-    """
-    return list(scan_history.values())
-
-
-# ============= HEALTH CHECK =============
 
 @app.get("/health")
-async def health_check() -> Dict:
-    """
-    Health check endpoint
-    
-    Returns:
-        Status information
-    """
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "timestamp": datetime.now().isoformat()
-    }
+async def health():
+    return {"ok": True, "service": APP_NAME or "Guardian AI"}
 
 
-# ============= ROOT =============
+@app.post("/scan")
+async def scan_endpoint(input_data: ScanInput):
+    """Full pipeline: Scout → Analyst → Educator → ScanResult. Uses mocks until agents exist."""
+    scout_result = await _run_scout(input_data)
 
-@app.get("/")
-async def root() -> Dict:
-    """
-    Root endpoint with API info
-    
-    Returns:
-        API information
-    """
-    return {
-        "name": "Guardian AI",
-        "version": "1.0.0",
-        "description": "Real-time protection from scams and privacy violations",
-        "endpoints": {
-            "scout": "/scout/analyze",
-            "warnings": "/scout/warnings",
-            "full_scan": "/scan",
-            "health": "/health"
-        }
-    }
+    if scout_result.recommendation == "SAFE":
+        analyst_result = _mock_analyst(scout_result)
+        educator_result = _mock_educator(analyst_result)
+    else:
+        analyst_result = await _run_analyst(scout_result)
+        educator_result = await _run_educator(analyst_result)
 
+    result = _assemble_scan_result(input_data, analyst_result, educator_result)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        from database import save_scan
+        await save_scan(result.model_dump())
+    except Exception as e:
+        logger.exception("Could not save scan to database")
+        print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
+
+    return result.model_dump()
