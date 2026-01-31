@@ -35,7 +35,8 @@ class ScoutAgent:
             "company_spoofing": ["amazon", "apple", "google", "microsoft", "paypal", "bank of america", "wells fargo"]
         }
         
-        self.suspicious_file_types = [".exe", ".scr", ".vbs", ".bat", ".com", ".pif", ".zip", ".rar"]
+        # Only detect actual executable file types, not .com domains
+        self.suspicious_file_types = [".exe", ".scr", ".vbs", ".bat", ".pif", ".zip", ".rar"]
     
     async def analyze(self, input_data: ScanInput) -> ScoutOutput:
         """
