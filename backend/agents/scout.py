@@ -1,6 +1,7 @@
 """
 Scout Agent - Guardian AI's First Line of Defense
-Provides real-time analysis of emails, screenshots, and web pages
+Provides real-time analysis of emails, screenshots, and web pages.
+Covers all threat types: phishing, scams, malware indicators, and privacy.
 """
 
 import os
@@ -353,6 +354,71 @@ class ScoutAgent:
                 return True
         
         return False
+
+
+def compute_risk_from_signal(
+    url: str,
+    is_login: bool,
+    has_privacy_policy: bool,
+    detected_keywords: List[str],
+    detected_scam: Optional[List[str]] = None,
+    detected_malware: Optional[List[str]] = None,
+) -> Dict:
+    """
+    Compute risk_score from extension SCOUT_SIGNAL payload.
+    Covers phishing, scams, malware indicators, and privacy. Used by POST /api/scout/scan.
+    Login on unknown/suspicious domain = high risk.
+    """
+    risk = 0
+    detected_scam = detected_scam or []
+    detected_malware = detected_malware or []
+    metadata = {
+        "isLogin": is_login,
+        "hasPrivacyPolicy": has_privacy_policy,
+        "detectedKeywords": detected_keywords or [],
+        "detectedScam": detected_scam,
+        "detectedMalware": detected_malware,
+    }
+
+    # Phishing/urgency keywords
+    risk += min(len(detected_keywords or []) * 10, 45)
+    # Scam keywords (prize, inheritance, tech support, refund, crypto, etc.)
+    risk += min(len(detected_scam) * 14, 45)
+    # Malware / suspicious download cues
+    risk += min(len(detected_malware) * 18, 50)
+
+    # Login page: high risk if URL looks non-trusted (no https or odd domain)
+    if is_login:
+        url_lower = (url or "").lower()
+        has_https = url_lower.startswith("https://")
+        # Known high-trust patterns (simplified)
+        trusted = any(
+            x in url_lower
+            for x in [
+                "google.com",
+                "apple.com",
+                "microsoft.com",
+                "github.com",
+                "paypal.com",
+                "amazon.com",
+                "facebook.com",
+                "twitter.com",
+                "linkedin.com",
+            ]
+        )
+        if not has_https:
+            risk += 50
+        elif not trusted:
+            risk += 35
+        else:
+            risk += 10
+
+    # Privacy policy present: informational only (blue badge), small risk bump
+    if has_privacy_policy:
+        risk += 5
+
+    risk_score = min(risk, 100)
+    return {"risk_score": risk_score, "metadata": metadata}
 
 
 # Create singleton instance

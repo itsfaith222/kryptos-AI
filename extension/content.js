@@ -1,143 +1,124 @@
 /**
- * Guardian AI Scout - Content Script
- * Runs on every web page to detect threats
- * - Scans DOM for urgency signals
- * - Listens for copy/paste events
- * - Sends data to background script
+ * Guardian AI Scout - Content Script (Broad Scanning)
+ * Multi-vector scanner: phishing, scams, malware cues, login detection, privacy policy
+ * Sends structured SCOUT_SIGNAL to background script
  */
 
-console.log('Guardian AI Scout initialized on page:', window.location.href);
+(function () {
+  'use strict';
 
-// Urgency keywords to detect
-const URGENCY_KEYWORDS = [
-  'action required',
-  'urgent',
-  'immediate',
-  'verify',
-  'confirm',
-  'suspended',
-  'locked',
-  'expires',
-  'limited time',
-  'act now',
-  'click here',
-  'update required',
-  'security alert',
-  'unusual activity'
-];
+  // Phishing / urgency
+  const PHISHING_KEYWORDS = [
+    'urgent', 'action required', 'suspended', 'immediate', 'verify', 'confirm',
+    'expires', 'limited time', 'act now', 'click here', 'update required',
+    'security alert', 'unusual activity', 're-confirm'
+  ];
 
-/**
- * Scan DOM for urgency signals
- */
-function scanPageForSignals() {
-  const signals = {
-    url: window.location.href,
-    urgencySignals: [],
-    hasLoginForm: false,
-    timestamp: new Date().toISOString()
-  };
-  
-  // Check for login forms
-  const loginForms = document.querySelectorAll('form[action*="login"], form[action*="signin"], input[type="password"]');
-  signals.hasLoginForm = loginForms.length > 0;
-  
-  // Scan page text for urgency keywords
-  const pageText = document.body.innerText.toLowerCase();
-  URGENCY_KEYWORDS.forEach(keyword => {
-    if (pageText.includes(keyword)) {
-      signals.urgencySignals.push(keyword);
-    }
-  });
-  
-  return signals;
-}
+  // Scam patterns (prize, inheritance, tech support, refund, crypto, romance)
+  const SCAM_KEYWORDS = [
+    'claim prize', 'you won', 'congratulations', 'inheritance', 'inherited',
+    'tech support', 'microsoft support', 'apple support', 'refund', 'wire transfer',
+    'send money', 'bitcoin', 'crypto', 'investment opportunity', 'act now or lose',
+    'limited offer', 'free gift', 'claim now', 'urgent reply', 'verify your account'
+  ];
 
-/**
- * Send signals to background script
- */
-function sendSignalsToBackground(signals) {
-  chrome.runtime.sendMessage(
-    { action: 'scanPage', signals: signals },
-    response => {
-      if (chrome.runtime.lastError) {
-        console.warn('Background script not responding:', chrome.runtime.lastError);
-      } else if (response && response.riskScore > 70) {
-        showWarningBanner(response);
-      }
-    }
-  );
-}
+  // Malware / suspicious download cues
+  const MALWARE_KEYWORDS = [
+    'download now', 'install update', '.exe', 'run this file', 'enable macros',
+    'click to install', 'security update required', 'flash player update'
+  ];
 
-/**
- * Scan page on load
- */
-const pageSignals = scanPageForSignals();
-sendSignalsToBackground(pageSignals);
+  const PRIVACY_LINK_PATTERNS = ['privacy', 'terms', 't&c', 'terms and conditions', 'privacy policy'];
 
-/**
- * Listen for copy/paste events
- */
-document.addEventListener('paste', (event) => {
-  const pastedText = event.clipboardData?.getData('text') || '';
-  if (pastedText.length > 10) {
-    console.log('Paste detected, sending to background:', pastedText.substring(0, 50));
-    chrome.runtime.sendMessage(
-      { action: 'analyzeText', text: pastedText },
-      response => {
-        if (chrome.runtime.lastError) {
-          console.warn('Background script not responding');
-        }
-      }
-    );
+  /**
+   * Scan page for threat keywords (phishing + scam + malware) in visible text
+   */
+  function getDetectedKeywords() {
+    const text = (document.body && document.body.innerText) ? document.body.innerText.toLowerCase() : '';
+    const phishing = PHISHING_KEYWORDS.filter((kw) => text.includes(kw));
+    const scam = SCAM_KEYWORDS.filter((kw) => text.includes(kw));
+    const malware = MALWARE_KEYWORDS.filter((kw) => text.includes(kw));
+    return { phishing, scam, malware, all: [...phishing, ...scam, ...malware] };
   }
-});
 
-/**
- * Show warning banner for dangerous pages
- */
-function showWarningBanner(result) {
-  const banner = document.createElement('div');
-  banner.id = 'guardian-warning-banner';
-  banner.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    background: #ef4444;
-    color: white;
-    padding: 16px;
-    text-align: center;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 16px;
-    z-index: 2147483647;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    animation: slideDown 0.3s ease-out;
-  `;
-  
-  banner.innerHTML = `
-    <div style="max-width: 1200px; margin: 0 auto;">
-      <strong>🚨 Guardian AI Warning</strong>
-      <span style="font-size: 14px; margin-left: 8px;">
-        Risk Score: ${result.riskScore}/100
-      </span>
-      <button id="guardian-dismiss" style="
-        margin-left: 16px;
-        padding: 8px 16px;
-        background: white;
-        color: #ef4444;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 13px;
-      ">
-        Dismiss
-      </button>
-    </div>
-  `;
-  
-  document.body.prepend(banner);
-  document.getElementById('guardian-dismiss').addEventListener('click', () => {
-    banner.remove();
+  /**
+   * Detect login page: password input or forms with login/sign-in IDs or classes
+   */
+  function isLoginPage() {
+    const hasPasswordInput = document.querySelector('input[type="password"]') !== null;
+    const loginFormSelectors = [
+      'form[action*="login"]',
+      'form[action*="signin"]',
+      'form[action*="sign-in"]',
+      'form#login',
+      'form#signin',
+      'form#sign-in',
+      'form[id*="login"]',
+      'form[id*="signin"]',
+      'form[class*="login"]',
+      'form[class*="sign-in"]'
+    ];
+    const hasLoginForm = loginFormSelectors.some((sel) => {
+      try {
+        return document.querySelector(sel) !== null;
+      } catch (_) {
+        return false;
+      }
+    });
+    return hasPasswordInput || hasLoginForm;
+  }
+
+  /**
+   * Detect links to privacy policy / terms (privacy, terms, T&C)
+   */
+  function hasPrivacyPolicyLinks() {
+    const links = document.querySelectorAll('a[href]');
+    for (const a of links) {
+      const href = (a.getAttribute('href') || '').toLowerCase();
+      const text = (a.textContent || '').toLowerCase();
+      const combined = `${href} ${text}`;
+      const matches = PRIVACY_LINK_PATTERNS.some((p) => combined.includes(p));
+      if (matches) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Build and send SCOUT_SIGNAL to background
+   */
+  function sendScoutSignal() {
+    const keywords = getDetectedKeywords();
+    const payload = {
+      action: 'SCOUT_SIGNAL',
+      url: window.location.href,
+      isLogin: isLoginPage(),
+      hasPrivacyPolicy: hasPrivacyPolicyLinks(),
+      detectedKeywords: keywords.all,
+      detectedPhishing: keywords.phishing,
+      detectedScam: keywords.scam,
+      detectedMalware: keywords.malware
+    };
+
+    chrome.runtime.sendMessage(payload, () => {
+      if (chrome.runtime.lastError) { /* background not ready yet */ }
+    });
+  }
+
+  // Run scan on load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', sendScoutSignal);
+  } else {
+    sendScoutSignal();
+  }
+
+  // Listen for paste: send text to background for analysis (any text, not just email)
+  document.addEventListener('paste', (e) => {
+    const pastedText = (e.clipboardData && e.clipboardData.getData('text')) || '';
+    if (pastedText.length > 10) {
+      chrome.runtime.sendMessage(
+        { action: 'analyzeText', text: pastedText },
+        () => { if (chrome.runtime.lastError) { /* ignore */ } }
+      );
+    }
   });
-}
+})();

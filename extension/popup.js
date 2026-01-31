@@ -1,32 +1,33 @@
 /**
- * Scout - Popup Logic
+ * Guardian AI Scout - Popup (Manual Tools)
+ * Paste Analysis for any text (email, SMS, privacy paragraph).
+ * Shows "Privacy Policy Found" when content script detected one on current tab.
  */
 
 const BACKEND_URL = 'http://localhost:8000';
 
-// DOM Elements
 const pasteInput = document.getElementById('paste-input');
 const analyzeBtn = document.getElementById('analyze-btn');
 const pasteResult = document.getElementById('paste-result');
 const pageResult = document.getElementById('page-result');
 const currentPageEl = document.getElementById('current-page');
 const statusMessage = document.getElementById('status-message');
+const privacyNotice = document.getElementById('privacy-notice');
 
-// Analyze button handler
 analyzeBtn.addEventListener('click', async () => {
   const text = pasteInput.value.trim();
-  
+
   if (!text || text.length < 10) {
     showStatus('Please paste at least 10 characters', 'error');
     return;
   }
-  
+
   analyzeBtn.disabled = true;
   analyzeBtn.textContent = 'Analyzing...';
   pasteResult.innerHTML = '<div class="loading"></div> Analyzing...';
-  
+
   try {
-    const result = await sendToBackend(text);
+    const result = await sendPasteToBackend(text);
     displayResult(pasteResult, result);
     showStatus('Analysis complete', 'success');
   } catch (error) {
@@ -38,43 +39,28 @@ analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-// Send text to backend
-async function sendToBackend(text) {
-  const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url: '',
-      signals: extractSignals(text),
-      hasLoginForm: false
-    })
+/** Send pasted text via background so backend gets same SCOUT_SIGNAL-style payload */
+async function sendPasteToBackend(text) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ action: 'pasteAnalysis', text }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message || 'Extension error'));
+        return;
+      }
+      if (response && response.error) {
+        reject(new Error(response.error));
+        return;
+      }
+      resolve(response || { riskScore: 0 });
+    });
   });
-  
-  if (!response.ok) {
-    throw new Error(`Backend error: ${response.status}`);
-  }
-  
-  return await response.json();
 }
 
-// Extract urgency signals
-function extractSignals(text) {
-  const urgencyKeywords = [
-    'urgent', 'immediate', 'action required', 'verify', 'confirm',
-    'suspended', 'locked', 'expires', 'limited time', 'act now',
-    'click here', 'update required', 'security alert', 'unusual activity'
-  ];
-  
-  const textLower = text.toLowerCase();
-  return urgencyKeywords.filter(keyword => textLower.includes(keyword));
-}
-
-// Display result
 function displayResult(container, result) {
-  const risk = result.riskScore || 0;
+  const risk = result.riskScore != null ? result.riskScore : 0;
   let riskColor = 'green';
   let riskEmoji = '✅';
-  
+
   if (risk > 70) {
     riskColor = 'red';
     riskEmoji = '🚨';
@@ -82,8 +68,8 @@ function displayResult(container, result) {
     riskColor = 'yellow';
     riskEmoji = '⚠️';
   }
-  
-  const html = `
+
+  container.innerHTML = `
     <div class="result-content">
       <div class="risk-score ${riskColor}">
         <span class="emoji">${riskEmoji}</span>
@@ -91,21 +77,18 @@ function displayResult(container, result) {
       </div>
       <div class="risk-label">Risk Score</div>
       <div class="recommendation">
-        ${risk > 70 ? '🚨 High Risk - Do not proceed' : 
-          risk >= 40 ? '⚠️ Medium Risk - Be cautious' : 
+        ${risk > 70 ? '🚨 High Risk - Do not proceed' :
+          risk >= 40 ? '⚠️ Medium Risk - Be cautious' :
           '✅ Low Risk - Appears safe'}
       </div>
     </div>
   `;
-  
-  container.innerHTML = html;
 }
 
-// Show status message
 function showStatus(message, type = 'info') {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${type}`;
-  
+
   if (type !== 'error') {
     setTimeout(() => {
       statusMessage.textContent = '';
@@ -114,33 +97,56 @@ function showStatus(message, type = 'info') {
   }
 }
 
-// Load current page status
+/** Load current tab status and show Privacy Policy Found if content script detected one */
 async function loadCurrentPageStatus() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentPageEl.textContent = `Current page: ${new URL(tab.url).hostname}`;
-    
-    const hasLogin = tab.url.toLowerCase().includes('login');
-    
-    const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: tab.url,
-        signals: [],
-        hasLoginForm: hasLogin
-      })
-    });
-    
-    if (response.ok) {
-      const result = await response.json();
-      displayResult(pageResult, result);
+    if (!tab || !tab.id) {
+      currentPageEl.textContent = 'No active tab';
+      privacyNotice.style.display = 'none';
+      return;
     }
-  } catch (error) {
+
+    const hostname = tab.url ? new URL(tab.url).hostname : 'Unknown';
+    currentPageEl.textContent = `Current page: ${hostname}`;
+
+    const tabState = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'getTabState', tabId: tab.id }, (r) => {
+        resolve(r != null ? r : null);
+      });
+    });
+
+    if (tabState && tabState.hasPrivacyPolicy) {
+      privacyNotice.style.display = 'block';
+    } else {
+      privacyNotice.style.display = 'none';
+    }
+
+    if (tab.url && tab.url.startsWith('http')) {
+      const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: tab.url,
+          isLogin: false,
+          hasPrivacyPolicy: tabState ? !!tabState.hasPrivacyPolicy : false,
+          detectedKeywords: []
+        })
+      });
+      if (response.ok) {
+        const result = await response.json();
+        displayResult(pageResult, result);
+      } else {
+        pageResult.innerHTML = '<div class="error">Backend unavailable</div>';
+      }
+    } else {
+      pageResult.innerHTML = '';
+    }
+  } catch (_) {
     currentPageEl.textContent = 'Unable to analyze current page';
-    pageResult.innerHTML = `<div class="error">Backend unavailable</div>`;
+    pageResult.innerHTML = '<div class="error">Backend unavailable</div>';
+    privacyNotice.style.display = 'none';
   }
 }
 
-// Load on popup open
 document.addEventListener('DOMContentLoaded', loadCurrentPageStatus);

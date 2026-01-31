@@ -214,8 +214,36 @@ body {
   color: #f59e0b;
 }
 
-.risk-score.low {
+.risk-score.low,
+.risk-score.green {
   color: #10b981;
+}
+
+.risk-score.yellow {
+  color: #f59e0b;
+}
+
+.risk-score.red {
+  color: #ef4444;
+}
+
+.result-box {
+  margin-top: 12px;
+  padding: 12px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  min-height: 40px;
+}
+
+.privacy-notice {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #eff6ff;
+  border-left: 4px solid #0000FF;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #1e40af;
 }
 
 @keyframes pulse {

@@ -16,7 +16,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from contracts import ScanInput, ScoutOutput, AnalystOutput, EducatorOutput, ScanResult
-from agents.scout import scout
+from agents.scout import scout, compute_risk_from_signal
+from database import save_scan as db_save_scan
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -44,40 +45,61 @@ scan_log: List[Dict] = []  # Simple in-memory log for now
 @app.post("/api/scout/scan")
 async def api_scout_scan(request: Dict) -> Dict:
     """
-    API endpoint for Chrome extension
-    Simplified endpoint that returns riskScore
-    
-    Args:
-        request: Dict with url, signals, hasLoginForm
-        
-    Returns:
-        Dict with riskScore
+    API endpoint for Chrome extension (SCOUT_SIGNAL payload).
+    Computes risk from url, isLogin, hasPrivacyPolicy, detectedKeywords.
+    Persists scan to MongoDB when available.
     """
     try:
-        url = request.get('url', '')
-        signals = request.get('signals', [])
-        has_login = request.get('hasLoginForm', False)
-        
-        # Hardcoded logic as per requirements
-        risk_score = 10  # Default low risk
-        
-        # If URL contains 'login' or signals contain 'urgent', return 85
-        if 'login' in url.lower() or any('urgent' in s.lower() for s in signals):
-            risk_score = 85
-        
-        # Log scan in memory
+        url = request.get("url", "")
+        is_login = request.get("isLogin", False)
+        has_privacy_policy = request.get("hasPrivacyPolicy", False)
+        detected_keywords = request.get("detectedKeywords", [])
+        detected_scam = request.get("detectedScam", [])
+        detected_malware = request.get("detectedMalware", [])
+        # Legacy shape from extension
+        if detected_keywords == [] and "signals" in request:
+            detected_keywords = request.get("signals", [])
+
+        result = compute_risk_from_signal(
+            url=url,
+            is_login=is_login,
+            has_privacy_policy=has_privacy_policy,
+            detected_keywords=detected_keywords,
+            detected_scam=detected_scam,
+            detected_malware=detected_malware,
+        )
+        risk_score = result["risk_score"]
+        metadata = result.get("metadata", {})
+
+        # Persist to MongoDB (async-safe: runs in thread pool)
+        scan_id = db_save_scan(
+            url=url or "(paste)",
+            score=risk_score,
+            metadata={
+                "isLogin": is_login,
+                "hasPrivacyPolicy": has_privacy_policy,
+                "detectedKeywords": detected_keywords,
+                "detectedScam": detected_scam,
+                "detectedMalware": detected_malware,
+            },
+        )
+        if scan_id:
+            metadata["scanId"] = scan_id
+
         scan_log.append({
-            'url': url,
-            'signals': signals,
-            'riskScore': risk_score,
-            'timestamp': datetime.now().isoformat()
+            "url": url,
+            "riskScore": risk_score,
+            "timestamp": datetime.now().isoformat(),
+            **metadata,
         })
-        
+
         return {
-            'riskScore': risk_score,
-            'url': url,
-            'signals': signals,
-            'timestamp': datetime.now().isoformat()
+            "riskScore": risk_score,
+            "url": url,
+            "hasPrivacyPolicy": has_privacy_policy,
+            "detectedKeywords": detected_keywords,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata,
         }
     except Exception as e:
         print(f"Error in API scout scan: {e}")
