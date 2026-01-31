@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header with logo and status badge -->
+    <div class="header">
+      <h1>Guardian AI</h1>
+      <span id="status-badge" class="badge badge-green">Safe</span>
+    </div>
+    
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="scan">Quick Scan</button>
+      <button class="tab" data-tab="paste">Paste Analysis</button>
+      <button class="tab" data-tab="upload">Upload Image</button>
+    </div>
+    
+    <!-- Tab Content: Quick Scan -->
+    <div id="scan-tab" class="tab-content active">
+      <p class="tab-description">Analyzing current page...</p>
+      <div id="scan-results" class="results"></div>
+    </div>
+    
+    <!-- Tab Content: Paste Analysis -->
+    <div id="paste-tab" class="tab-content">
+      <textarea id="message-input" class="input-textarea" placeholder="Paste suspicious email or message here..."></textarea>
+      <button id="analyze-btn" class="btn btn-primary">Analyze Message</button>
+      <div id="paste-results" class="results"></div>
+    </div>
+    
+    <!-- Tab Content: Upload Image -->
+    <div id="upload-tab" class="tab-content">
+      <input type="file" id="image-input" class="input-file" accept="image/*">
+      <button id="upload-btn" class="btn btn-primary">Analyze Screenshot</button>
+      <div id="upload-results" class="results"></div>
+    </div>
+    
+    <!-- Predictive Warnings -->
+    <div class="warnings-section">
+      <h3>Active Threats Near You</h3>
+      <div id="warnings-list"></div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
