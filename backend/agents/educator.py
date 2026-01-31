@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
-import requests
+# import requests  # ElevenLabs disabled - only used for voice
 from dotenv import load_dotenv
 
 # Load .env for local runs (safe in prod too; it won't override real env vars)
@@ -25,11 +25,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 MONGODB_DB = os.getenv("MONGODB_DB", "guardian_ai")
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
+# ElevenLabs disabled - no API key; uncomment when you have keys
+# ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+# ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
+# EDUCATOR_VOICE_ENABLED = os.getenv("EDUCATOR_VOICE_ENABLED", "true").lower() == "true"
+EDUCATOR_VOICE_ENABLED = False  # Voice disabled until ElevenLabs keys are set
 
 EDUCATOR_DEFAULT_LANG = os.getenv("EDUCATOR_DEFAULT_LANG", "en")
-EDUCATOR_VOICE_ENABLED = os.getenv("EDUCATOR_VOICE_ENABLED", "true").lower() == "true"
 
 # Toggle this to True when you want prints
 EDUCATOR_DEBUG = os.getenv("EDUCATOR_DEBUG", "false").lower() == "true"
@@ -252,54 +254,28 @@ def _log_learning(user_id: str, analyst: AnalystOutput, tags: List[str]) -> None
 
 
 def _voice_alert(text: str) -> Optional[str]:
-    # If any of these are missing, voice should be None — we print WHY (only if debug)
-    if not EDUCATOR_VOICE_ENABLED:
-        if EDUCATOR_DEBUG:
-            print("DEBUG ElevenLabs: voice disabled (EDUCATOR_VOICE_ENABLED=false)")
-        return None
-    if not ELEVENLABS_API_KEY:
-        if EDUCATOR_DEBUG:
-            print("DEBUG ElevenLabs: missing ELEVENLABS_API_KEY")
-        return None
-    if not ELEVENLABS_VOICE_ID:
-        if EDUCATOR_DEBUG:
-            print("DEBUG ElevenLabs: missing ELEVENLABS_VOICE_ID")
-        return None
-
-    short = (text.split(".")[0] or text).strip()
-    if len(short) > 240:
-        short = short[:240] + "…"
-
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg"
-    }
-
-    # Try multilingual model (usually safest across accounts)
-    payload = {"text": short, "model_id": "eleven_multilingual_v2"}
-
-    try:
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-
-        if EDUCATOR_DEBUG:
-            print("DEBUG ElevenLabs status:", r.status_code)
-            print("DEBUG ElevenLabs content-type:", r.headers.get("content-type"))
-            try:
-                print("DEBUG ElevenLabs body:", (r.text or "")[:300])
-            except Exception:
-                print("DEBUG ElevenLabs body: <unavailable>")
-
-        if r.status_code != 200:
-            return None
-
-        import base64
-        return "audio/mpeg;base64," + base64.b64encode(r.content).decode("utf-8")
-    except Exception as ex:
-        if EDUCATOR_DEBUG:
-            print("DEBUG ElevenLabs exception:", repr(ex))
-        return None
+    # ElevenLabs disabled - no API key; returns None so voiceAlert is always None
+    # Uncomment the block below and add ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID when you have keys
+    return None
+    # --- ElevenLabs code (commented out) ---
+    # if not EDUCATOR_VOICE_ENABLED:
+    #     return None
+    # if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+    #     return None
+    # short = (text.split(".")[0] or text).strip()
+    # if len(short) > 240:
+    #     short = short[:240] + "…"
+    # url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    # headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"}
+    # payload = {"text": short, "model_id": "eleven_multilingual_v2"}
+    # try:
+    #     r = requests.post(url, headers=headers, json=payload, timeout=20)
+    #     if r.status_code != 200:
+    #         return None
+    #     import base64
+    #     return "audio/mpeg;base64," + base64.b64encode(r.content).decode("utf-8")
+    # except Exception:
+    #     return None
 
 
 # =============================
@@ -314,7 +290,6 @@ async def explain(
 
     if EDUCATOR_DEBUG:
         print("DEBUG: riskScore =", analyst_output.riskScore, "voice enabled =", EDUCATOR_VOICE_ENABLED)
-        print("DEBUG: Eleven key loaded =", bool(ELEVENLABS_API_KEY), "voice id =", ELEVENLABS_VOICE_ID)
         print("DEBUG: Mongo enabled =", bool(MONGODB_URI))
 
     privacy = _bucket_privacy_evidence(analyst_output.evidence)
@@ -333,11 +308,10 @@ async def explain(
 
     _log_learning(user_id, analyst_output, tags)
 
+    # ElevenLabs disabled - voiceAlert is always None without API keys
     voice = None
-    if analyst_output.riskScore >= 70:
-        if EDUCATOR_DEBUG:
-            print("DEBUG: calling _voice_alert() now")
-        voice = _voice_alert(explanation)
+    # if analyst_output.riskScore >= 70:
+    #     voice = _voice_alert(explanation)
 
     return EducatorOutput(
         explanation=explanation,
