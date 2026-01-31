@@ -101,33 +101,3 @@ class AnalystAgent:
         elif risk_score >= 40:
             return ["⚠️ Proceed with caution", "Verify official channels"]
         return ["✅ Low risk detected"]
-
-
-# ==========================================
-# STANDALONE TESTING
-# ==========================================
-async def test_hour_4_6():
-    print("=" * 60)
-    print("🧪 TESTING HOUR 4-6: MITRE + WHOIS + OPENROUTER")
-    print("=" * 60)
-
-    scout_data = {
-        "url": "https://paypa1-verify.com/login",
-        "content": "URGENT: Verify your account within 24 hours or it will be suspended!",
-        "signals": {"hasPassword": True, "sslValid": False},
-    }
-
-    analyst = AnalystAgent(db=None)
-    result = await analyst.analyze_threat(scout_data)
-
-    print("📊 RESULTS")
-    print(f"Risk: {result['riskScore']}/100")
-    print(f"Threat: {result['threatType']}")
-    print(f"MITRE Techs: {[t['name'] for t in result['mitreAttackTechniques']]}")
-    print(f"Tactics: {[t['type'] for t in result['manipulationTactics']]}")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_hour_4_6())
