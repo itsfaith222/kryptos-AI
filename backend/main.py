@@ -34,12 +34,12 @@ async def startup():
     has_uri = bool(uri and uri != "mongodb://localhost:27017")
     print(f"\n[Guardian AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
 
-# CORS
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+# CORS: allow dashboard + Chrome extension (chrome-extension://)
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,chrome-extension://")
 CORS_ORIGINS = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=["*"],  # Extension ID varies when unpacked; * allows all for dev
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -148,6 +148,55 @@ def _assemble_scan_result(
 @app.get("/health")
 async def health():
     return {"ok": True, "service": APP_NAME or "Guardian AI"}
+
+
+@app.post("/api/scout/scan")
+async def api_scout_scan(request: dict):
+    """
+    Extension endpoint: accepts SCOUT_SIGNAL payload (url, isLogin, hasPrivacyPolicy,
+    detectedKeywords, detectedScam, detectedMalware) and returns riskScore, hasPrivacyPolicy.
+    """
+    try:
+        from agents.scout import compute_risk_from_signal
+        result = compute_risk_from_signal(
+            url=request.get("url", ""),
+            is_login=request.get("isLogin", False),
+            has_privacy_policy=request.get("hasPrivacyPolicy", False),
+            detected_keywords=request.get("detectedKeywords", []),
+            detected_scam=request.get("detectedScam"),
+            detected_malware=request.get("detectedMalware"),
+        )
+        risk_score = result["risk_score"]
+        metadata = result.get("metadata", {})
+        metadata["scanId"] = str(uuid4())
+        metadata["timestamp"] = datetime.utcnow().isoformat()
+        return {
+            "riskScore": risk_score,
+            "url": request.get("url", ""),
+            "hasPrivacyPolicy": request.get("hasPrivacyPolicy", False),
+            "detectedKeywords": request.get("detectedKeywords", []),
+            "timestamp": metadata["timestamp"],
+            "metadata": metadata,
+        }
+    except (ImportError, AttributeError) as e:
+        logger.debug("compute_risk_from_signal not available: %s", e)
+        # Fallback: simple risk from keywords
+        kw = request.get("detectedKeywords", [])
+        scam = request.get("detectedScam", [])
+        malware = request.get("detectedMalware", [])
+        risk = min(100, len(kw) * 10 + len(scam) * 14 + len(malware) * 18)
+        if request.get("isLogin"):
+            risk = min(100, risk + 35)
+        if request.get("hasPrivacyPolicy"):
+            risk = min(100, risk + 5)
+        return {
+            "riskScore": min(risk, 100),
+            "url": request.get("url", ""),
+            "hasPrivacyPolicy": request.get("hasPrivacyPolicy", False),
+            "detectedKeywords": kw,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {"isLogin": request.get("isLogin"), "hasPrivacyPolicy": request.get("hasPrivacyPolicy")},
+        }
 
 
 @app.post("/scan")
