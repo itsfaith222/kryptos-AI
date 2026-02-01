@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Open template–inspired component styles (buttons, motion) */
+@layer components {
+  .btn-primary-open {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-[11px] text-sm font-medium text-white transition-all duration-200;
+    background: linear-gradient(to top, theme("colors.indigo.600"), theme("colors.indigo.500"));
+    background-size: 100% 100%;
+    background-position: bottom;
+  }
+  .btn-primary-open:hover {
+    background-size: 100% 150%;
+    opacity: 0.95;
+  }
+  .btn-secondary-open {
+    @apply inline-flex items-center justify-center rounded-lg border border-gray-600/80 bg-gray-800/80 px-4 py-[11px] text-sm font-medium text-gray-200 transition-all duration-200 hover:bg-gray-700/80 hover:border-gray-500;
+  }
+  .animate-fade-up {
+    animation: fade-up 0.4s ease-out forwards;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Dashboard background: gradient + arc pattern (photo-inspired, slate/indigo theme) */
+.dashboard-bg {
+  /* Dark edges (slate-950), subtle indigo/violet glow toward center */
+  background:
+    radial-gradient(
+      ellipse 85% 75% at 50% 45%,
+      rgba(49, 46, 129, 0.45) 0%,
+      rgba(30, 27, 75, 0.2) 40%,
+      transparent 65%
+    ),
+    radial-gradient(
+      ellipse 100% 100% at 50% 50%,
+      rgba(15, 23, 42, 0.98) 0%,
+      #0f172a 50%,
+      #020617 100%
+    );
+  background-color: #020617;
+}
+
+/* Curved arc pattern overlay – luminous concentric arcs, more visible + gradient fade */
+.dashboard-arcs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0.92;
+  /* Gradient mask: pattern fades toward edges so it blends into the background */
+  mask-image: radial-gradient(
+    ellipse 75% 70% at 50% 45%,
+    black 0%,
+    rgba(0, 0, 0, 0.7) 45%,
+    rgba(0, 0, 0, 0.25) 70%,
+    transparent 85%
+  );
+  -webkit-mask-image: radial-gradient(
+    ellipse 75% 70% at 50% 45%,
+    black 0%,
+    rgba(0, 0, 0, 0.7) 45%,
+    rgba(0, 0, 0, 0.25) 70%,
+    transparent 85%
+  );
+}
+
+.dashboard-arcs svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 160vmax;
+  min-height: 160vmax;
+  width: 160vmax;
+  height: 160vmax;
+}

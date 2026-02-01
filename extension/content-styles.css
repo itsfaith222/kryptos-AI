@@ -1,0 +1,85 @@
+/* Content script styles for Scout */
+
+#guardian-warning-banner {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+#guardian-tooltip {
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Link Hover Tooltips – match extension blue, no white */
+.kryptos-ai-tooltip {
+  position: absolute;
+  z-index: 999999;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  min-width: 180px;
+  max-width: 280px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.kryptos-ai-tooltip .tooltip-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px 8px 0 0;
+  font-weight: 600;
+  color: white;
+}
+
+.kryptos-ai-tooltip .tooltip-header.safe {
+  background: #10b981;
+}
+
+.kryptos-ai-tooltip .tooltip-header.warning {
+  background: #f59e0b;
+}
+
+.kryptos-ai-tooltip .tooltip-header.danger {
+  background: #ef4444;
+}
+
+.kryptos-ai-tooltip .tooltip-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.kryptos-ai-tooltip .tooltip-label {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+.kryptos-ai-tooltip .tooltip-body {
+  padding: 8px 10px;
+  color: #e2e8f0;
+  line-height: 1.4;
+  font-size: 11px;
+}

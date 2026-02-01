@@ -1,4 +1,8 @@
 
 backend/.env
 .env
-
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.doc_* 

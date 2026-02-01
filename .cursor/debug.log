@@ -1,0 +1,16 @@
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938412758,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"useWebSocket.js:onopen","message":"WebSocket open","data":{"url":"ws://localhost:5173/ws"},"timestamp":1769938414387,"sessionId":"debug-session","hypothesisId":"H4"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938414422,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938478179,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938478311,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"useWebSocket.js:onopen","message":"WebSocket open","data":{"url":"ws://localhost:5173/ws"},"timestamp":1769938478445,"sessionId":"debug-session","hypothesisId":"H4"}
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938488365,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938488484,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"useWebSocket.js:onopen","message":"WebSocket open","data":{"url":"ws://localhost:5173/ws"},"timestamp":1769938488657,"sessionId":"debug-session","hypothesisId":"H4"}
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938491027,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938491031,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938491292,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938491296,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"useWebSocket.js:onopen","message":"WebSocket open","data":{"url":"ws://localhost:5173/ws"},"timestamp":1769938491591,"sessionId":"debug-session","hypothesisId":"H4"}
+{"location":"App.jsx:fetchHistory","message":"fetchHistory start","data":{"API_BASE":""},"timestamp":1769938500386,"sessionId":"debug-session","hypothesisId":"H5"}
+{"location":"App.jsx:fetchHistory-done","message":"fetchHistory response","data":{"ok":true,"count":100},"timestamp":1769938500472,"sessionId":"debug-session","hypothesisId":"H5"}
