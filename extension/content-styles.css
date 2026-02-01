@@ -29,7 +29,7 @@
 }
 
 /* Link Hover Tooltips */
-.guardian-ai-tooltip {
+.kryptos-ai-tooltip {
   position: absolute;
   z-index: 999999;
   background: white;
@@ -44,7 +44,7 @@
   pointer-events: none;
 }
 
-.guardian-ai-tooltip .tooltip-header {
+.kryptos-ai-tooltip .tooltip-header {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -54,29 +54,29 @@
   color: white;
 }
 
-.guardian-ai-tooltip .tooltip-header.safe {
+.kryptos-ai-tooltip .tooltip-header.safe {
   background: #10b981;
 }
 
-.guardian-ai-tooltip .tooltip-header.warning {
+.kryptos-ai-tooltip .tooltip-header.warning {
   background: #f59e0b;
 }
 
-.guardian-ai-tooltip .tooltip-header.danger {
+.kryptos-ai-tooltip .tooltip-header.danger {
   background: #ef4444;
 }
 
-.guardian-ai-tooltip .tooltip-emoji {
+.kryptos-ai-tooltip .tooltip-emoji {
   font-size: 14px;
   line-height: 1;
 }
 
-.guardian-ai-tooltip .tooltip-label {
+.kryptos-ai-tooltip .tooltip-label {
   font-size: 11px;
   letter-spacing: 0.3px;
 }
 
-.guardian-ai-tooltip .tooltip-body {
+.kryptos-ai-tooltip .tooltip-body {
   padding: 8px 10px;
   color: #374151;
   line-height: 1.4;

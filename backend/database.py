@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 MONGODB_URI = (os.getenv("MONGODB_URI", "mongodb://localhost:27017") or "").strip()
-DB_NAME = os.getenv("MONGODB_DB", "guardian_ai").strip() or "guardian_ai"
+DB_NAME = (os.getenv("MONGODB_DB", "M0") or "M0").strip() or "M0"
 COLLECTION = "scans"
 
 _client = None
@@ -59,6 +59,19 @@ async def get_recent_scans(limit: int = 10) -> list:
         return list(cursor)
     except Exception:
         return []
+
+
+async def get_scan_by_id(scan_id: str) -> dict | None:
+    """Get a single scan by scanId. Returns None if not found."""
+    try:
+        db = _get_db()
+        doc = db[COLLECTION].find_one({"scanId": scan_id})
+        if doc is None:
+            return None
+        doc.pop("_id", None)
+        return doc
+    except Exception:
+        return None
 
 
 # --- GridFS audio for Educator (voice alerts) ---

@@ -1,5 +1,5 @@
 /**
- * Guardian AI Scout - Popup (Manual Tools)
+ * Kryptos-AI Scout - Popup (Manual Tools)
  * Full pipeline: Scout → Analyst → Educator → display (paste + current page).
  * Shows "Privacy Policy Found" when content script detected one on current tab.
  */
@@ -262,9 +262,17 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
 
   analyzeScreenshotBtn.disabled = true;
   analyzeScreenshotBtn.textContent = 'Analyzing...';
-  screenshotResult.innerHTML = '<div class="loading"></div> Running full analysis...';
+  screenshotResult.innerHTML = '<div class="loading"></div> Opening dashboard...';
 
   try {
+    // Open webapp first so user sees it immediately (smooth transition)
+    const webappTab = await chrome.tabs.create({
+      url: WEBAPP_URL + '/',
+      active: true
+    });
+
+    screenshotResult.innerHTML = '<div class="loading"></div> Running full analysis...';
+
     const result = await fullScanToBackend({
       url: '',
       scanType: 'image',
@@ -272,19 +280,15 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
       image_data: currentImageData
     });
 
-    // Open webapp with scan results
-    const WEBAPP_URL = 'http://localhost:5173'; // Vite dev server
     const scanId = result.scanId || 'latest';
 
-    // Open webapp in new tab with scan ID
-    chrome.tabs.create({
-      url: `${WEBAPP_URL}/scan/${scanId}`,
-      active: true
-    });
+    // Navigate the open tab to the scan result
+    if (webappTab && webappTab.id) {
+      chrome.tabs.update(webappTab.id, { url: `${WEBAPP_URL}/scan/${scanId}` });
+    }
 
-    // Show success message in popup
-    screenshotResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete! Opening in dashboard...</div>';
-    showStatus('Opening full analysis in dashboard', 'success');
+    screenshotResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete!</div>';
+    showStatus('Full analysis opened in dashboard', 'success');
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
     screenshotResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
@@ -294,7 +298,7 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
   }
 });
 
-/** On popup open: run full pipeline (Scout → Analyst → Educator) for current tab and show full result. No button click. */
+/** On popup open: show last scan for this tab (from background cache). Scan runs on page load and every 5 min; we do not re-scan here. */
 async function loadCurrentPageStatus() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -339,13 +343,14 @@ async function loadCurrentPageStatus() {
       privacyNotice.style.display = 'none';
     }
 
+    // Show last scan result (scan runs on page load + every 5 min in background; we don't re-scan on popup open)
     if (tab.url && tab.url.startsWith('http')) {
-      pageResult.innerHTML = '<div class="loading"></div> Running full scan (Scout → Analyst → Educator)...';
-      const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
-      if (result.error) {
-        pageResult.innerHTML = `<div class="error">❌ ${result.error}</div>`;
+      if (tabState && tabState.fullResult && !tabState.fullResult.error) {
+        displayFullResult(pageResult, tabState.fullResult);
+      } else if (tabState && tabState.skippedReason === 'localhost') {
+        pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Localhost - No scan needed</div>';
       } else {
-        displayFullResult(pageResult, result);
+        pageResult.innerHTML = '<div style="color: #94a3b8; font-size: 13px;">Scan runs when the page loads. If you just opened this tab, wait a moment and open the extension again.</div>';
       }
     } else {
       pageResult.innerHTML = '';

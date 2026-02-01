@@ -1,5 +1,5 @@
 /**
- * Guardian AI Scout - Content Script (Broad Scanning)
+ * Kryptos-AI Scout - Content Script (Broad Scanning)
  * Multi-vector scanner: phishing, scams, malware cues, login detection, privacy policy
  * Sends structured SCOUT_SIGNAL to background script
  */
@@ -166,8 +166,8 @@
     removeTooltip();
 
     const tooltip = document.createElement('div');
-    tooltip.className = 'guardian-ai-tooltip';
-    tooltip.id = 'guardian-ai-tooltip';
+    tooltip.className = 'kryptos-ai-tooltip';
+    tooltip.id = 'kryptos-ai-tooltip';
 
     const risk = result.risk || 0;
     let riskClass = 'safe';

@@ -29,7 +29,7 @@ from contracts import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=APP_NAME or "Guardian AI")
+app = FastAPI(title=APP_NAME or "Kryptos-AI")
 
 # --- WebSocket: broadcast new scans to dashboard clients ---
 _ws_connections: set[WebSocket] = set()
@@ -73,7 +73,7 @@ async def startup():
     """Log MongoDB config on startup so you can verify in terminal."""
     uri = os.getenv("MONGODB_URI", "")
     has_uri = bool(uri and uri != "mongodb://localhost:27017")
-    print(f"\n[Guardian AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
+    print(f"\n[Kryptos-AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
 
 # CORS: allow dashboard + Chrome extension (chrome-extension://)
 _cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,chrome-extension://")
@@ -198,60 +198,45 @@ def _assemble_scan_result(
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": APP_NAME or "Guardian AI"}
+    return {"ok": True, "service": APP_NAME or "Kryptos-AI"}
 
 
 @app.post("/educator/chat")
 async def educator_chat(request: dict):
-    """Chat with the Educator LLM — wired to educator.chat_reply (age + last_scan_result for Person C)."""
+    """Chat with the Educator LLM — user asks security/privacy questions."""
+    import requests as req
+
     msg = (request.get("message") or "").strip()
     if not msg or len(msg) > 2000:
         raise HTTPException(status_code=400, detail="Message required (max 2000 chars)")
 
-    age = request.get("age")
-    if age is not None and (not isinstance(age, int) or age < 0 or age > 120):
-        age = None
-    last_scan_result = request.get("last_scan_result") or request.get("lastScanResult")
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Educator not configured (OPENROUTER_API_KEY)")
 
+    system = (
+        "You are the Kryptos-AI Educator: a concise security and privacy expert. "
+        "Answer user questions about phishing, scams, malware, and privacy in 2-5 sentences. "
+        "Be direct and helpful. No fluff."
+    )
     try:
-        from agents.educator import chat_reply
-        reply = await asyncio.to_thread(chat_reply, msg, age=age, last_scan_result=last_scan_result)
-        return {"reply": reply}
-    except (ImportError, AttributeError):
-        # Person C (Educator) will add chat_reply; until then use fallback
-        logger.warning("Educator chat_reply not available, using fallback")
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=503, detail="Educator not configured (OPENROUTER_API_KEY)")
-        import requests as req
-        system = (
-            "You are the Guardian AI Educator: a concise security and privacy expert. "
-            "Answer user questions about phishing, scams, malware, and privacy in 2-5 sentences. "
-            "Be direct and helpful. No fluff."
+        r = req.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001"),
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": msg},
+                ],
+            },
+            timeout=30,
         )
-        try:
-            r = req.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001"),
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": msg},
-                    ],
-                },
-                timeout=30,
-            )
-            r.raise_for_status()
-            reply = (r.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-            return {"reply": reply}
-        except req.exceptions.RequestException as e:
-            logger.warning("Educator chat failed: %s", e)
-            raise HTTPException(status_code=503, detail="Educator unavailable") from e
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    except Exception as e:
-        logger.warning("Educator chat_reply failed: %s", e)
+        r.raise_for_status()
+        reply = (r.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        return {"reply": reply}
+    except req.exceptions.RequestException as e:
+        logger.warning("Educator chat failed: %s", e)
         raise HTTPException(status_code=503, detail="Educator unavailable") from e
 
 
@@ -280,6 +265,33 @@ async def get_history(limit: int = 50):
         return out
     except Exception as e:
         logger.exception("Failed to fetch history")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/scan/{scan_id}")
+async def get_scan_by_id(scan_id: str):
+    """Get a single scan by scanId (for webapp /scan/:id page and extension 'View Full Analysis')."""
+    try:
+        from database import get_scan_by_id as db_get_scan_by_id
+        scan = await db_get_scan_by_id(scan_id)
+        if scan is None:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        from bson import ObjectId
+
+        def _serialize(obj):
+            if isinstance(obj, ObjectId):
+                return str(obj)
+            if isinstance(obj, dict):
+                return {k: _serialize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_serialize(x) for x in obj]
+            return obj
+
+        return _serialize(scan)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch scan %s", scan_id)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -366,19 +378,6 @@ async def api_scout_scan(request: dict):
         }
 
 
-def _is_localhost_url(url: str) -> bool:
-    """True if URL is localhost or 127.0.0.1 (we do not record these in history)."""
-    if not url or not isinstance(url, str):
-        return False
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        host = (parsed.hostname or parsed.netloc or "").lower().split(":")[0]
-        return host in ("localhost", "127.0.0.1", "::1") or host.startswith("127.")
-    except Exception:
-        return False
-
-
 @app.post("/scan")
 async def scan_endpoint(request: Request, input_data: ScanInput):
     """Full pipeline: Scout → Analyst → Educator → ScanResult → DB → client (extension/dashboard)."""
@@ -394,17 +393,14 @@ async def scan_endpoint(request: Request, input_data: ScanInput):
         educator_result = await _run_educator(analyst_result)
         result = _assemble_scan_result(input_data, analyst_result, educator_result)
         result_dict = result.model_dump()
-        url = result_dict.get("url") or getattr(input_data, "url", "") or ""
-        if not _is_localhost_url(url):
-            try:
-                from database import save_scan
-                await save_scan(result_dict)
-            except Exception as e:
-                logger.exception("Could not save scan to database")
-                print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
-            await broadcast_scan_result(result_dict)
-        else:
-            logger.info("Skipping save/broadcast for localhost URL: %s", url[:80] if url else "")
+        try:
+            from database import save_scan
+            await save_scan(result_dict)
+        except Exception as e:
+            logger.exception("Could not save scan to database")
+            print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
+        # Real-time: broadcast to dashboard WebSocket clients
+        await broadcast_scan_result(result_dict)
         return result_dict
     except (ValueError, RuntimeError) as e:
         msg = str(e)

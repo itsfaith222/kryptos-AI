@@ -1,5 +1,5 @@
 """
-Scout Agent - Guardian AI's First Line of Defense
+Scout Agent - Kryptos-AI's First Line of Defense
 Provides real-time analysis of emails, screenshots, and web pages.
 Covers all threat types: phishing, scams, malware indicators, and privacy.
 """
@@ -164,27 +164,52 @@ Look for: company logos (legitimate or fake), urgency language, requests for per
 Extract ALL visible text including URLs and phone numbers. Respond with JSON only:
 {"hasLogo": true/false, "logoQuality": "high/medium/low", "suspiciousElements": [], "extractedText": "all visible text", "urls": [], "phoneNumbers": [], "overallAssessment": "legitimate/suspicious/scam"}"""
 
-        # OpenRouter vision: image in content as image_url (data URL)
-        image_url = f"data:image/png;base64,{image_data}" if "base64," not in image_data[:20] else image_data
+        # OpenRouter vision: image as data URL; strip base64 whitespace (newlines can cause 400)
+        image_str = (image_data or "").strip().replace("\n", "").replace("\r", "")
+        has_data_prefix = "base64," in (image_data or "")[:30]
+        if has_data_prefix:
+            image_url = image_str
+        else:
+            image_url = f"data:image/png;base64,{image_str}"
+        # OpenRouter accepts both image_url (OpenAI-style) and imageUrl; try image_url first for compatibility
         content = [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": image_url}}
         ]
+        payload = {"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": content}]}
 
         try:
             resp = req.post(
                 OPENROUTER_URL,
                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                json={"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": content}]},
-                timeout=45,
+                json=payload,
+                timeout=60,
             )
+            if resp.status_code == 400:
+                # Some providers expect camelCase imageUrl; retry with that format
+                content_alt = [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "imageUrl": {"url": image_url}}
+                ]
+                resp = req.post(
+                    OPENROUTER_URL,
+                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": content_alt}]},
+                    timeout=60,
+                )
             resp.raise_for_status()
             raw = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
             if not raw:
                 raise RuntimeError("Scout image: OpenRouter returned empty response")
-            
+            raw = raw.strip()
+            # Strip markdown code fence if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.lower().startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
             # Parse JSON response
-            result = json.loads(raw.strip())
+            result = json.loads(raw)
             signals["hasLogo"] = result.get("hasLogo", False)
             signals["logoQuality"] = result.get("logoQuality", "high")
             signals["suspiciousImages"] = result.get("overallAssessment") != "legitimate"

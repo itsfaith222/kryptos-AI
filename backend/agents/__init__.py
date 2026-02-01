@@ -16,7 +16,7 @@ except (ImportError, ValueError):
     from whois_checker import WHOISChecker
 
 class AnalystAgent:
-    """The Analyst Agent - Guardian AI's Deep Investigator (Hour 4-6)"""
+    """The Analyst Agent - Kryptos-AI's Deep Investigator (Hour 4-6)"""
     
     def __init__(self, db=None):
         """Initialize Analyst Agent with OpenRouter-powered Gemini"""

@@ -41,7 +41,6 @@ function HistoryPanel({ history, onNewScan }) {
 function formatAlertTime(isoString) {
   if (!isoString) return '—'
   try {
-    // Backend sends UTC ISO without 'Z'; JS parses that as local time. Treat as UTC.
     const s = String(isoString).trim()
     const hasZone = /Z$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)
     const utc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !hasZone
@@ -80,6 +79,8 @@ function AlertCard({ alert }) {
     if (alert.url) hostname = new URL(alert.url).hostname
   } catch (_) {}
 
+  const detailUrl = alert.scanId ? `/scan/${alert.scanId}` : null
+
   return (
     <div className="rounded-xl border border-slate-700/80 bg-slate-800/40 p-4 hover:border-slate-600/80 transition">
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -105,14 +106,21 @@ function AlertCard({ alert }) {
           preload="metadata"
         />
       )}
+      {detailUrl && (
+        <a
+          href={detailUrl}
+          className="inline-block mt-2 text-xs text-emerald-400 hover:text-emerald-300"
+        >
+          View full analysis →
+        </a>
+      )}
     </div>
   )
 }
 
-function EducatorChat({ addToast, lastScanResult }) {
+function EducatorChat({ addToast }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [age, setAge] = useState('') // optional: for age-aware Educator (Person C)
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
 
@@ -130,15 +138,11 @@ function EducatorChat({ addToast, lastScanResult }) {
     setInput('')
     setLoading(true)
 
-    const body = { message: text }
-    if (age != null && Number.isInteger(age) && age >= 0 && age <= 120) body.age = age
-    if (lastScanResult != null && typeof lastScanResult === 'object') body.last_scan_result = lastScanResult
-
     try {
       const res = await fetch(`${API_BASE}/educator/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ message: text }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -189,8 +193,8 @@ function EducatorChat({ addToast, lastScanResult }) {
         )}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={sendMessage} className="p-4 border-t border-slate-700/80 space-y-2">
-        <div className="flex gap-2 items-center">
+      <form onSubmit={sendMessage} className="p-4 border-t border-slate-700/80">
+        <div className="flex gap-2">
           <input
             type="text"
             value={input}
@@ -212,9 +216,138 @@ function EducatorChat({ addToast, lastScanResult }) {
   )
 }
 
+function ScanDetailPage({ scanId }) {
+  const [scan, setScan] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetchScan() {
+      try {
+        const res = await fetch(`${API_BASE}/api/scan/${scanId}`)
+        if (!res.ok) {
+          if (res.status === 404) setError('Scan not found')
+          else setError('Failed to load scan')
+          return
+        }
+        const data = await res.json()
+        if (!cancelled) setScan(data)
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Request failed')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    fetchScan()
+    return () => { cancelled = true }
+  }, [scanId])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <svg className="animate-spin h-10 w-10 text-emerald-500" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <p className="text-slate-400">Loading analysis…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !scan) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-400 mb-4">{error || 'Scan not found'}</p>
+          <a href="/" className="text-emerald-400 hover:text-emerald-300">← Back to dashboard</a>
+        </div>
+      </div>
+    )
+  }
+
+  const risk = scan.riskScore ?? 0
+  const voiceAlert = scan.voiceAlert
+  const hasVoice = Boolean(voiceAlert)
+  const audioSrc = hasVoice
+    ? voiceAlert.startsWith('audio/mpeg;base64,')
+      ? voiceAlert
+      : `${API_BASE}/audio/${voiceAlert}`
+    : null
+
+  let urlHost = scan.url
+  try {
+    if (scan.url) urlHost = new URL(scan.url).hostname
+  } catch (_) {}
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+      <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+          <a href="/" className="text-slate-400 hover:text-white text-sm">← Back to dashboard</a>
+          <span className="text-slate-500 text-xs truncate max-w-[200px]" title={scan.scanId}>{scan.scanId?.slice(0, 8)}…</span>
+        </div>
+      </nav>
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex items-center gap-3 mb-6">
+          <RiskBadge score={risk} />
+          <span className="text-slate-500 text-sm">{scan.threatType || 'unknown'}</span>
+          {scan.url && (
+            <a href={scan.url} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline text-sm truncate max-w-[240px]">
+              {urlHost}
+            </a>
+          )}
+        </div>
+        {scan.explanation && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Explanation</h2>
+            <p className="text-slate-200 leading-relaxed">{scan.explanation}</p>
+          </section>
+        )}
+        {scan.nextSteps?.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Next steps</h2>
+            <ul className="list-disc list-inside text-slate-200 space-y-1">
+              {scan.nextSteps.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {scan.evidence?.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Evidence</h2>
+            <ul className="space-y-2">
+              {scan.evidence.map((e, i) => (
+                <li key={i} className="text-slate-300 text-sm border-l-2 border-slate-600 pl-3">
+                  {e.finding || JSON.stringify(e)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {scan.mitreAttackTechniques?.length > 0 && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">MITRE ATT&amp;CK</h2>
+            <p className="text-slate-300 text-sm">{scan.mitreAttackTechniques.join(', ')}</p>
+          </section>
+        )}
+        {hasVoice && audioSrc && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Voice alert</h2>
+            <audio controls src={audioSrc} className="w-full h-10" preload="metadata" />
+          </section>
+        )}
+      </main>
+    </div>
+  )
+}
+
 function Dashboard() {
   useEffect(() => {
-    document.title = APP_NAME ? `${APP_NAME} Dashboard` : 'Guardian AI Dashboard'
+    document.title = APP_NAME ? `${APP_NAME} Dashboard` : 'Kryptos-AI Dashboard'
   }, [])
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
@@ -253,7 +386,7 @@ function Dashboard() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-white">{APP_NAME || 'Guardian AI'}</h1>
+                <h1 className="text-lg font-semibold text-white">{APP_NAME || 'Kryptos-AI'}</h1>
                 <p className="text-xs text-slate-500">Dashboard</p>
               </div>
             </div>
@@ -294,10 +427,7 @@ function Dashboard() {
               <p className="text-slate-500 text-xs mt-0.5">Ask about security, privacy, phishing &amp; scams</p>
             </div>
             <div className="flex-1 min-h-0 overflow-hidden">
-              <EducatorChat
-                addToast={addToast}
-                lastScanResult={history[0] ?? null}
-              />
+              <EducatorChat addToast={addToast} />
             </div>
           </div>
         </div>
@@ -306,10 +436,21 @@ function Dashboard() {
   )
 }
 
-export default function App() {
+function AppRouter() {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : ''
+  const scanMatch = pathname.match(/^\/scan\/([^/]+)$/)
+  const scanId = scanMatch ? scanMatch[1] : null
+
+  if (scanId) {
+    return <ScanDetailPage scanId={scanId} />
+  }
   return (
     <ToastProvider>
       <Dashboard />
     </ToastProvider>
   )
+}
+
+export default function App() {
+  return <AppRouter />
 }

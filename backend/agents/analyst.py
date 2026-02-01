@@ -27,7 +27,7 @@ except ImportError:
 
 
 class AnalystAgent:
-    """The Analyst Agent - Guardian AI's Deep Investigator"""
+    """The Analyst Agent - Kryptos-AI's Deep Investigator"""
 
     def __init__(self, db=None):
         """Initialize Analyst Agent"""

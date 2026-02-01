@@ -82,7 +82,7 @@ async function postFullScan(payload) {
 async function handleScoutSignal(signal, sender, sendResponse) {
   const tabId = sender.tab && sender.tab.id;
 
-  console.log('[Guardian AI Background] 🔍 Received Scout signal from tab', tabId, {
+  console.log('[Kryptos-AI Background] 🔍 Received Scout signal from tab', tabId, {
     url: signal.url,
     isLogin: signal.isLogin,
     hasPrivacyPolicy: signal.hasPrivacyPolicy,
@@ -97,7 +97,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
       url.hostname.endsWith('.local');
 
     if (isLocalhost) {
-      console.log('[Guardian AI Background] ⏭️ Skipping localhost URL:', signal.url);
+      console.log('[Kryptos-AI Background] ⏭️ Skipping localhost URL:', signal.url);
       // Set safe badge for localhost
       chrome.action.setBadgeText({ text: '✓', tabId: tabId || null });
       chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId: tabId || null });
@@ -116,7 +116,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
     }
   } catch (e) {
     // Invalid URL, continue with scan anyway
-    console.log('[Guardian AI Background] ⚠️ Could not parse URL, scanning anyway:', signal.url);
+    console.log('[Kryptos-AI Background] ⚠️ Could not parse URL, scanning anyway:', signal.url);
   }
   // ===== END localhost check =====
 
@@ -129,7 +129,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
       content: ''
     });
 
-    console.log('[Guardian AI Background] ✅ Full scan complete for tab', tabId, {
+    console.log('[Kryptos-AI Background] ✅ Full scan complete for tab', tabId, {
       riskScore: result.riskScore,
       threatType: result.threatType
     });
@@ -150,7 +150,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
 
     sendResponse(result);
   } catch (err) {
-    console.error('[Guardian AI Background] ❌ Full scan failed for tab', tabId, err);
+    console.error('[Kryptos-AI Background] ❌ Full scan failed for tab', tabId, err);
     setBadgeFromResult({ riskScore: 0, hasPrivacyPolicy: signal.hasPrivacyPolicy }, tabId);
     if (tabId != null) {
       tabState.set(tabId, { hasPrivacyPolicy: signal.hasPrivacyPolicy, riskScore: 0, url: signal.url });
@@ -195,7 +195,7 @@ async function handleAnalyzeText(text, sendResponse) {
     });
     sendResponse(result);
   } catch (err) {
-    console.error('[Guardian AI] Text analysis failed:', err);
+    console.error('[Kryptos-AI] Text analysis failed:', err);
     sendResponse({ error: err.message, riskScore: 0 });
   }
 }
@@ -232,7 +232,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       content: request.content || null,
       image_data: request.image_data || null
     }).then(sendResponse).catch((err) => {
-      console.error('[Guardian AI] Full scan failed:', err);
+      console.error('[Kryptos-AI] Full scan failed:', err);
       sendResponse({ error: err.message });
     });
     return true;
@@ -240,7 +240,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'checkLinkSafety') {
     // Quick link safety check for hover tooltips
     checkLinkSafety(request.url).then(sendResponse).catch((err) => {
-      console.error('[Guardian AI] Link safety check failed:', err);
+      console.error('[Kryptos-AI] Link safety check failed:', err);
       sendResponse({ risk: 0, reason: 'Check failed' });
     });
     return true;
@@ -308,6 +308,31 @@ setInterval(() => {
     }
   }
 }, 60 * 1000); // Clean every minute
+
+// Re-scan active tab every 5 minutes (scan on load is handled by SCOUT_SIGNAL; this keeps results fresh)
+const RESCAN_INTERVAL_MS = 5 * 60 * 1000;
+setInterval(async () => {
+  try {
+    const window = await chrome.windows.getLastFocused();
+    if (!window || !window.id) return;
+    const [tab] = await chrome.tabs.query({ active: true, windowId: window.id });
+    if (!tab || !tab.id || !tab.url || !tab.url.startsWith('http')) return;
+    const url = new URL(tab.url);
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.endsWith('.local')) return;
+    const result = await postFullScan({ url: tab.url, scanType: 'page', content: '' });
+    if (tab.id != null) {
+      tabState.set(tab.id, {
+        hasPrivacyPolicy: result.hasPrivacyPolicy,
+        riskScore: result.riskScore,
+        url: tab.url,
+        fullResult: result
+      });
+    }
+    setBadgeFromResult({ riskScore: result.riskScore, hasPrivacyPolicy: result.hasPrivacyPolicy }, tab.id);
+  } catch (e) {
+    // Ignore (tab closed, backend down, etc.)
+  }
+}, RESCAN_INTERVAL_MS);
 
 // Default badge on load: Scanning
 setBadgeScanning();

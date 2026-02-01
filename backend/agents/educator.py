@@ -24,7 +24,7 @@ OPENROUTER_MODEL = "google/gemini-2.0-flash-001"
 
 # Mongo is OPTIONAL — educator must work without it
 MONGODB_URI = os.getenv("MONGODB_URI", "")
-MONGODB_DB = os.getenv("MONGODB_DB", "guardian_ai")
+MONGODB_DB = os.getenv("MONGODB_DB", "M0") or "M0"
 
 # ElevenLabs (optional) — when enabled, voice MP3 stored in GridFS
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
@@ -355,7 +355,7 @@ async def explain(
 
     voice = None
     if analyst_output.riskScore >= 70:
-        voice = _voice_alert(explanation, analyst_output, lang)
+        voice = _voice_alert(explanation, metadata={"riskScore": analyst_output.riskScore, "threatType": analyst_output.threatType})
 
     return EducatorOutput(
         explanation=explanation,
