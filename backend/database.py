@@ -1,5 +1,5 @@
 """
-Database - Person D: MongoDB schema, save/load scan results
+Database - Person D: MongoDB schema, save/load scan results, GridFS audio for Educator
 """
 import os
 from pathlib import Path
@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 MONGODB_URI = (os.getenv("MONGODB_URI", "mongodb://localhost:27017") or "").strip()
-DB_NAME = "M0"
+DB_NAME = os.getenv("MONGODB_DB", "guardian_ai").strip() or "guardian_ai"
 COLLECTION = "scans"
 
 _client = None
 _db = None
+_fs = None
 
 
 def _get_db():
@@ -28,6 +29,16 @@ def _get_db():
         return _db
     except Exception as e:
         raise RuntimeError(f"MongoDB connection failed: {e}") from e
+
+
+def _get_fs():
+    """Lazy-init GridFS on the same DB (for Educator audio)."""
+    global _fs
+    if _fs is not None:
+        return _fs
+    from gridfs import GridFS
+    _fs = GridFS(_get_db())  # noqa: PLW0603
+    return _fs
 
 
 async def save_scan(scan_result: dict) -> None:
@@ -48,3 +59,20 @@ async def get_recent_scans(limit: int = 10) -> list:
         return list(cursor)
     except Exception:
         return []
+
+
+# --- GridFS audio for Educator (voice alerts) ---
+
+
+def save_audio(mp3_bytes: bytes, filename: str, metadata: dict) -> str:
+    """Store MP3 bytes in GridFS; returns file_id (str) for later retrieval."""
+    fs = _get_fs()
+    file_id = fs.put(mp3_bytes, filename=filename, metadata=metadata)
+    return str(file_id)
+
+
+def get_audio(file_id: str):
+    """Retrieve audio file from GridFS by file_id (str). Returns GridOut (read .read() for bytes)."""
+    from bson import ObjectId
+    fs = _get_fs()
+    return fs.get(ObjectId(file_id))
