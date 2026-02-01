@@ -55,15 +55,13 @@ function displayFullResult(container, result) {
   const nextSteps = result.nextSteps || [];
   const evidence = result.evidence || [];
   const mitre = result.mitreAttackTechniques || [];
-  const threatType = result.threatType || 'unknown';
-
   container.innerHTML = `
     <div class="result-content full-result">
       <div class="risk-score ${riskColor}">
         <span class="emoji">${riskEmoji}</span>
         <span class="score">${risk}/100</span>
       </div>
-      <div class="risk-label">Risk Score · ${threatType}</div>
+      <div class="risk-label">Risk Score</div>
       ${explanation ? `<div class="explanation">${escapeHtml(explanation)}</div>` : ''}
       ${nextSteps.length ? `<div class="next-steps"><strong>Next steps:</strong><ul>${nextSteps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul></div>` : ''}
       ${evidence.length ? `<div class="evidence"><strong>Evidence:</strong><ul>${evidence.slice(0, 5).map(e => `<li>${escapeHtml(e.finding || JSON.stringify(e))}</li>`).join('')}</ul></div>` : ''}

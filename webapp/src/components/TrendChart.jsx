@@ -23,6 +23,8 @@ function bucketAlertsByHour(history, hours = 12) {
       hourKey,
       hourLabel,
       total: 0,
+      high: 0,
+      medium: 0,
     })
   }
 
@@ -49,6 +51,9 @@ function bucketAlertsByHour(history, hours = 12) {
       if (!buckets.has(hourKey)) continue
       const bucket = buckets.get(hourKey)
       bucket.total += 1
+      const risk = alert.riskScore ?? 0
+      if (risk >= 70) bucket.high += 1
+      else if (risk >= 40) bucket.medium += 1
     }
   }
 
@@ -102,8 +107,12 @@ export default function TrendChart({ history }) {
               name="Alerts"
               stroke="#64748b"
               strokeWidth={2}
-              dot={{ fill: '#64748b', strokeWidth: 0, r: 3 }}
-              activeDot={{ r: 4, fill: '#94a3b8' }}
+              dot={({ cx, cy, payload }) => {
+                if (payload.high > 0) return <circle cx={cx} cy={cy} r={4} fill="#ef4444" strokeWidth={0} />
+                if (payload.medium > 0) return <circle cx={cx} cy={cy} r={4} fill="#eab308" strokeWidth={0} />
+                return null
+              }}
+              activeDot={{ r: 5, fill: '#94a3b8', stroke: '#64748b' }}
               connectNulls
             />
           </LineChart>

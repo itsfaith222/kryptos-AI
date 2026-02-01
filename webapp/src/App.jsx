@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { APP_NAME } from './config'
 import { ToastProvider, useToast } from './components/Toasts'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -124,7 +124,6 @@ function AlertCard({ alert, onDismiss }) {
           <p className="text-slate-200 text-sm font-medium truncate max-w-[180px]" title={alert.url || '—'}>
             {hostname}
           </p>
-          <p className="text-slate-500 text-xs">{alert.threatType || 'unknown'}</p>
           <p className="text-slate-500 text-xs mt-0.5" title={alert.timestamp || ''}>
             {formatAlertTime(alert.timestamp)}
           </p>
@@ -132,7 +131,16 @@ function AlertCard({ alert, onDismiss }) {
         <RiskBadge score={risk} />
       </div>
       {alert.explanation && (
-        <p className="text-slate-400 text-xs line-clamp-2 mb-2">{alert.explanation}</p>
+        <div className="mb-2">
+          <p className="text-slate-500 text-xs font-medium mb-0.5">{risk < 40 ? 'Tips' : 'Explanation'}</p>
+          <p className="text-slate-400 text-xs line-clamp-2">{alert.explanation}</p>
+        </div>
+      )}
+      {(alert.pasted_content || alert.pastedContent) && !imageSrc && (
+        <div className="mb-2">
+          <p className="text-slate-500 text-xs font-medium mb-0.5">Pasted message</p>
+          <p className="text-slate-400 text-xs line-clamp-2">{alert.pasted_content || alert.pastedContent}</p>
+        </div>
       )}
       {imageSrc && (
         <div className="mt-2 rounded-lg overflow-hidden border border-slate-600/80 bg-slate-800/80 max-h-24 w-full">
@@ -511,9 +519,17 @@ function ScanDetailPage({ scanId }) {
             </div>
           </section>
         )}
+        {(scan.pasted_content || scan.pastedContent) && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Pasted message</h2>
+            <div className="rounded-xl border border-slate-700/80 bg-slate-800/50 p-4 max-w-2xl">
+              <pre className="text-slate-200 text-sm whitespace-pre-wrap font-sans break-words max-h-[50vh] overflow-y-auto">{scan.pasted_content || scan.pastedContent}</pre>
+            </div>
+          </section>
+        )}
         {scan.explanation && (
           <section className="mb-6">
-            <h2 className="text-sm font-semibold text-slate-400 mb-2">Explanation</h2>
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">{risk < 40 ? 'Tips' : 'Explanation'}</h2>
             <p className="text-slate-200 leading-relaxed">{scan.explanation}</p>
           </section>
         )}
@@ -556,20 +572,27 @@ function ScanDetailPage({ scanId }) {
   )
 }
 
+const HIGH_RISK_THRESHOLD = 70
+const PIN_HIGH_ALERT_MS = 60 * 60 * 1000 // 1 hour — after this, high alerts sort by time like others
+
 function sortAlertHistory(rows) {
   if (!Array.isArray(rows) || rows.length <= 1) return rows || []
+  const now = Date.now()
   return [...rows].sort((a, b) => {
     const riskA = a.riskScore ?? 0
     const riskB = b.riskScore ?? 0
-    const voiceA = Boolean(a.voiceAlert)
-    const voiceB = Boolean(b.voiceAlert)
-    // High risk (70+) first, then items with voice, then by timestamp (newest first)
-    if (riskA >= 70 && riskB < 70) return -1
-    if (riskA < 70 && riskB >= 70) return 1
-    if (voiceA && !voiceB) return -1
-    if (!voiceA && voiceB) return 1
     const tsA = new Date(a.timestamp || 0).getTime()
     const tsB = new Date(b.timestamp || 0).getTime()
+    const recentHighA = riskA >= HIGH_RISK_THRESHOLD && (now - tsA) < PIN_HIGH_ALERT_MS
+    const recentHighB = riskB >= HIGH_RISK_THRESHOLD && (now - tsB) < PIN_HIGH_ALERT_MS
+    // High alerts stay at top only for 1 hour; after that they sort by timestamp
+    if (recentHighA && !recentHighB) return -1
+    if (!recentHighA && recentHighB) return 1
+    if (recentHighA && recentHighB) return tsB - tsA
+    const voiceA = Boolean(a.voiceAlert)
+    const voiceB = Boolean(b.voiceAlert)
+    if (voiceA && !voiceB) return -1
+    if (!voiceA && voiceB) return 1
     return tsB - tsA
   })
 }
@@ -581,7 +604,14 @@ function Dashboard() {
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [dismissedIds, setDismissedIds] = useState(loadDismissedIds)
+  const [sortTick, setSortTick] = useState(0)
   const { addToast } = useToast()
+
+  // Re-sort list every minute so high-alert pin (1h) expires and newest-first order stays correct
+  useEffect(() => {
+    const id = setInterval(() => setSortTick((t) => t + 1), 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   const fetchHistory = useCallback(async () => {
     const controller = new AbortController()
@@ -624,6 +654,9 @@ function Dashboard() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [fetchHistory])
+
+  // Sort with current time so "recent high" (1h) expires and newest-first is correct
+  const sortedHistory = useMemo(() => sortAlertHistory(history), [history, sortTick])
 
   function onNewScan(payload) {
     if (!payload?.scanId) return
@@ -730,7 +763,7 @@ function Dashboard() {
                   </svg>
                 </div>
               ) : (
-                <HistoryPanel history={history} onNewScan={onNewScan} onDismissAlert={onDismissAlert} />
+                <HistoryPanel history={sortedHistory} onNewScan={onNewScan} onDismissAlert={onDismissAlert} />
               )}
             </div>
           </div>

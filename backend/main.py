@@ -194,6 +194,7 @@ def _assemble_scan_result(
         mitreAttackTechniques=analyst_result.mitreAttackTechniques or [],
         voiceAlert=educator_result.voiceAlert,
         image_data=input_data.image_data,
+        pasted_content=input_data.content if (input_data.content and input_data.scanType == "message") else None,
     )
 
 

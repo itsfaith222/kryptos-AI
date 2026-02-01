@@ -56,4 +56,5 @@ class ScanResult(BaseModel):
     mitreAttackTechniques: Optional[List[str]] = None
     voiceAlert: Optional[str] = None  # GridFS file_id for educator MP3 audio
     image_data: Optional[str] = None  # base64 or data URL of scanned image (when scanType is "image")
+    pasted_content: Optional[str] = None  # text user pasted (when scanType is "message" / paste analysis)
 
