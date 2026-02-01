@@ -1,14 +1,23 @@
 """
 whois_checker.py
-WHOIS Domain Checker — real lookup for domain age (python-whois)
-HOUR 4-6: Domain age detection
+GUARDIAN AI - WHOIS Domain Checker (Hour 6-12 Enhanced)
 """
 
 from datetime import datetime, timezone
+from typing import Dict
+import re
+
+
+SUSPICIOUS_TLDS = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.click']
+TRUSTED_DOMAINS = [
+    'google.com', 'youtube.com', 'facebook.com', 'twitter.com', 'x.com',
+    'microsoft.com', 'apple.com', 'amazon.com', 'paypal.com', 'netflix.com',
+    'linkedin.com', 'instagram.com', 'github.com', 'wikipedia.org', 'reddit.com',
+]
 
 
 def _normalize_domain(domain: str) -> str:
-    """Strip protocol, path, and www for WHOIS lookup."""
+    """Clean domain for WHOIS lookup"""
     if not domain:
         return ""
     domain = domain.strip().lower()
@@ -17,73 +26,128 @@ def _normalize_domain(domain: str) -> str:
             domain = domain[len(prefix):]
     if "/" in domain:
         domain = domain.split("/")[0]
+    if ":" in domain:
+        domain = domain.split(":")[0]
     return domain
 
 
-def _suspicion_heuristics(domain: str, age_days: int) -> int:
-    """Pattern-based suspicion (numbers, length, TLD). Add penalty for very new domains."""
-    suspicion = 0
-    if any(c.isdigit() for c in domain):
-        suspicion += 20
-    if len(domain.split(".")[0]) > 20:
-        suspicion += 15
-    if any(tld in domain for tld in [".tk", ".ml", ".ga", ".cf"]):
-        suspicion += 30
-    # Very new domain (real age from WHOIS)
-    if age_days >= 0 and age_days < 30:
-        suspicion += 35
-    elif age_days >= 0 and age_days < 90:
-        suspicion += 15
-    return min(suspicion, 100)
-
-
 class WHOISChecker:
-    """Check domain registration info using real WHOIS lookup for age."""
+    """Enhanced WHOIS checker"""
 
-    def check_domain(self, domain: str) -> dict:
-        """
-        Real WHOIS lookup for creation date; compute domainAgeDays and suspicionScore.
-        Falls back to heuristics only if WHOIS fails or returns no creation date.
-        """
+    def check_domain(self, domain: str) -> Dict:
+        """Check domain registration info"""
         domain = _normalize_domain(domain)
+        
         if not domain:
+            return self._empty_result()
+
+        # Check trusted domains
+        base_domain = '.'.join(domain.split('.')[-2:])
+        if base_domain in TRUSTED_DOMAINS:
             return {
-                "domainName": "",
-                "domainAgeDays": -1,
-                "registrar": "Unknown",
+                "domainName": domain,
+                "domainAgeDays": 3650,
+                "registrar": "Trusted Domain",
                 "privacyProtected": False,
-                "suspicionScore": 50,
+                "suspicionScore": 5,
             }
 
-        age_days = -1
-        registrar = "Unknown"
-        creation_date = None
+        result = {
+            "domainName": domain,
+            "domainAgeDays": -1,
+            "registrar": "Unknown",
+            "privacyProtected": False,
+            "suspicionScore": 0,
+        }
 
+        # Try real WHOIS lookup
+        whois_data = self._perform_whois_lookup(domain)
+        if whois_data:
+            result.update(whois_data)
+
+        # Calculate suspicion score
+        result["suspicionScore"] = self._calculate_suspicion(result, domain)
+
+        return result
+
+    def _empty_result(self) -> Dict:
+        return {
+            "domainName": "",
+            "domainAgeDays": -1,
+            "registrar": "Unknown",
+            "privacyProtected": False,
+            "suspicionScore": 50,
+        }
+
+    def _perform_whois_lookup(self, domain: str) -> Dict:
+        """Perform actual WHOIS lookup"""
         try:
             import whois
             w = whois.whois(domain)
-            creation_date = getattr(w, "creation_date", None)
-            if creation_date is not None:
+            
+            result = {}
+            
+            creation_date = getattr(w, 'creation_date', None)
+            if creation_date:
                 if isinstance(creation_date, list):
                     creation_date = creation_date[0]
                 now = datetime.now(timezone.utc)
                 if creation_date.tzinfo is None:
                     creation_date = creation_date.replace(tzinfo=timezone.utc)
-                age_days = (now - creation_date).days
-            if getattr(w, "registrar", None):
-                registrar = str(w.registrar) if w.registrar else "Unknown"
-        except ImportError:
-            # python-whois not installed; use heuristics only
-            age_days = -1
-        except Exception:
-            age_days = -1
-            creation_date = None
+                result["domainAgeDays"] = (now - creation_date).days
 
-        suspicion = _suspicion_heuristics(domain, age_days)
-        return {
-            "domainName": domain,
-            "domainAgeDays": age_days,
-            "registrar": registrar,
-            "privacyProtected": suspicion > 30,
-            "suspicionScore": suspicion,
-        }
+            registrar = getattr(w, 'registrar', None)
+            if registrar:
+                result["registrar"] = str(registrar)
+
+            # Check privacy protection
+            name = str(getattr(w, 'name', '') or '').lower()
+            org = str(getattr(w, 'org', '') or '').lower()
+            if any(p in name or p in org for p in ['privacy', 'protect', 'proxy', 'whoisguard']):
+                result["privacyProtected"] = True
+
+            return result
+
+        except ImportError:
+            return None
+        except Exception:
+            return None
+
+    def _calculate_suspicion(self, result: Dict, domain: str) -> int:
+        """Calculate suspicion score"""
+        suspicion = 0
+
+        age_days = result.get('domainAgeDays', -1)
+        if age_days >= 0:
+            if age_days < 7:
+                suspicion += 40
+            elif age_days < 30:
+                suspicion += 30
+            elif age_days < 90:
+                suspicion += 15
+        else:
+            suspicion += 15
+
+        # TLD check
+        for tld in SUSPICIOUS_TLDS:
+            if domain.endswith(tld):
+                suspicion += 25
+                break
+
+        # Pattern checks
+        if re.search(r'\d{3,}', domain):
+            suspicion += 15
+        if domain.count('-') >= 2:
+            suspicion += 15
+
+        # Brand impersonation check
+        brands = ['paypal', 'amazon', 'apple', 'microsoft', 'google', 'facebook', 'netflix', 'bank']
+        for brand in brands:
+            if brand in domain and domain != f'{brand}.com':
+                if '-' in domain or any(c.isdigit() for c in domain):
+                    suspicion += 30
+
+        if result.get('privacyProtected'):
+            suspicion += 10
+
+        return max(0, min(100, suspicion))

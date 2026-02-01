@@ -187,3 +187,4 @@ PRIVACY SCORE (higher = worse): 80-100=severe violations, 60-79=significant conc
             "redFlags": [],
             "reasoning": "AI analysis unavailable"
         }
+        
