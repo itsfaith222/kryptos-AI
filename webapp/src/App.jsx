@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { APP_NAME } from './config'
 import { ToastProvider, useToast } from './components/Toasts'
 import { useWebSocket } from './hooks/useWebSocket'
+import TrendChart from './components/TrendChart'
 
 const API_BASE = import.meta.env.DEV ? '' : 'http://localhost:8000'
 
@@ -651,9 +652,48 @@ function Dashboard() {
     setHistory((prev) => prev.filter((p) => (id != null ? p.scanId !== id : p !== alert)))
   }
 
+  const [educatorOpen, setEducatorOpen] = useState(false)
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 font-sans antialiased">
-      <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
+    <div className="relative min-h-screen overflow-hidden text-slate-100 font-sans antialiased">
+      {/* Photo-inspired gradient: dark edges, subtle indigo/violet glow at center */}
+      <div className="dashboard-bg absolute inset-0 z-0" aria-hidden />
+      {/* Curved arc pattern overlay */}
+      <div className="dashboard-arcs z-0" aria-hidden>
+        <svg viewBox="0 0 1600 1600" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            {/* Stronger gradient along stroke – indigo to slate, more visible */}
+            <linearGradient id="arc-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="rgb(129, 140, 248)" stopOpacity="0.42" />
+              <stop offset="50%" stopColor="rgb(99, 102, 241)" stopOpacity="0.38" />
+              <stop offset="100%" stopColor="rgb(148, 163, 184)" stopOpacity="0.28" />
+            </linearGradient>
+            {/* Alternate gradient for variety – brighter center feel */}
+            <linearGradient id="arc-stroke-alt" x1="100%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="rgb(165, 180, 252)" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="rgb(99, 102, 241)" stopOpacity="0.32" />
+            </linearGradient>
+          </defs>
+          {/* Concentric / radiating arcs – thicker strokes, more visible */}
+          <path d="M 200 800 A 600 900 0 0 1 800 200" stroke="url(#arc-stroke)" strokeWidth="1.4" fill="none" />
+          <path d="M 800 200 A 600 900 0 0 1 1400 800" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 1400 800 A 600 900 0 0 1 800 1400" stroke="url(#arc-stroke)" strokeWidth="1.4" fill="none" />
+          <path d="M 800 1400 A 600 900 0 0 1 200 800" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 100 800 A 800 600 0 0 0 800 100" stroke="url(#arc-stroke-alt)" strokeWidth="1.1" fill="none" />
+          <path d="M 800 100 A 800 600 0 0 0 1500 800" stroke="url(#arc-stroke-alt)" strokeWidth="1.1" fill="none" />
+          <path d="M 1500 800 A 800 600 0 0 0 800 1500" stroke="url(#arc-stroke-alt)" strokeWidth="1.1" fill="none" />
+          <path d="M 800 1500 A 800 600 0 0 0 100 800" stroke="url(#arc-stroke-alt)" strokeWidth="1.1" fill="none" />
+          <path d="M 400 800 A 400 700 0 0 1 800 400" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 800 400 A 400 700 0 0 1 1200 800" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 1200 800 A 400 700 0 0 1 800 1200" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 800 1200 A 400 700 0 0 1 400 800" stroke="url(#arc-stroke)" strokeWidth="1.2" fill="none" />
+          <path d="M 300 800 A 500 500 0 0 0 800 300" stroke="url(#arc-stroke-alt)" strokeWidth="1" fill="none" />
+          <path d="M 800 300 A 500 500 0 0 0 1300 800" stroke="url(#arc-stroke-alt)" strokeWidth="1" fill="none" />
+          <path d="M 1300 800 A 500 500 0 0 0 800 1300" stroke="url(#arc-stroke-alt)" strokeWidth="1" fill="none" />
+          <path d="M 800 1300 A 500 500 0 0 0 300 800" stroke="url(#arc-stroke-alt)" strokeWidth="1" fill="none" />
+        </svg>
+      </div>
+      <nav className="relative z-10 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-3">
@@ -673,9 +713,9 @@ function Dashboard() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-3.5rem)]">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-3.5rem)]">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0">
-          {/* History — left */}
+          {/* Alert history — left */}
           <div className="rounded-2xl border border-slate-700/80 bg-slate-800/30 flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-700/80">
               <h2 className="text-base font-semibold text-white">Alert history</h2>
@@ -695,18 +735,56 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Educator chat — right */}
-          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/30 flex flex-col overflow-hidden">
+          {/* Trend analysis — right */}
+          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/30 flex flex-col overflow-hidden min-h-0">
             <div className="px-5 py-4 border-b border-slate-700/80">
-              <h2 className="text-base font-semibold text-white">Educator chat</h2>
-              <p className="text-slate-500 text-xs mt-0.5">Ask about security, privacy, phishing &amp; scams</p>
+              <h2 className="text-base font-semibold text-white">Trend analysis</h2>
+              <p className="text-slate-500 text-xs mt-0.5">Alerts per hour · last 12 hours</p>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <EducatorChat addToast={addToast} />
+            <div className="flex-1 min-h-0">
+              <TrendChart history={history} />
             </div>
           </div>
         </div>
       </main>
+
+      {/* Floating educator bubble — bottom-right */}
+      {!educatorOpen ? (
+        <button
+          type="button"
+          onClick={() => setEducatorOpen(true)}
+          className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg transition hover:bg-indigo-500 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:ring-offset-slate-900"
+          title="Open Educator chat"
+          aria-label="Open Educator chat"
+        >
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+        </button>
+      ) : (
+        <div
+          className="fixed bottom-6 right-6 z-50 flex w-[420px] max-w-[calc(100vw-3rem)] flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl"
+          style={{ height: 'min(70vh, 560px)' }}
+        >
+          <div className="flex items-center justify-between border-b border-slate-700/80 px-4 py-3">
+            <h3 className="text-sm font-semibold text-white">Educator chat</h3>
+            <button
+              type="button"
+              onClick={() => setEducatorOpen(false)}
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-700/80 hover:text-white transition"
+              title="Close"
+              aria-label="Close Educator chat"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <EducatorChat addToast={addToast} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
