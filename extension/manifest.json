@@ -13,7 +13,8 @@
     "activeTab",
     "storage",
     "notifications",
-    "tabs"
+    "tabs",
+    "offscreen"
   ],
   "host_permissions": [
     "*://*/*"

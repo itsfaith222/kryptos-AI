@@ -30,16 +30,45 @@ function setBadgeFromResult(result, tabId) {
     color = '#0000FF'; // Blue - Privacy review available
   }
 
-  chrome.action.setBadgeText({ text, tabId: tabId || null });
-  chrome.action.setBadgeBackgroundColor({ color, tabId: tabId || null });
+  const p1 = chrome.action.setBadgeText({ text, tabId: tabId || null });
+  if (p1 && typeof p1.catch === 'function') p1.catch(() => {});
+  const p2 = chrome.action.setBadgeBackgroundColor({ color, tabId: tabId || null });
+  if (p2 && typeof p2.catch === 'function') p2.catch(() => {});
 }
 
 /**
  * Set badge to "Scanning" state
  */
 function setBadgeScanning(tabId) {
-  chrome.action.setBadgeText({ text: '...', tabId: tabId || null });
-  chrome.action.setBadgeBackgroundColor({ color: '#666666', tabId: tabId || null });
+  const p1 = chrome.action.setBadgeText({ text: '...', tabId: tabId || null });
+  if (p1 && typeof p1.catch === 'function') p1.catch(() => {});
+  const p2 = chrome.action.setBadgeBackgroundColor({ color: '#666666', tabId: tabId || null });
+  if (p2 && typeof p2.catch === 'function') p2.catch(() => {});
+}
+
+/**
+ * Play voice alert in offscreen document when high risk is found (page scan).
+ * Service workers cannot play audio; we use chrome.offscreen with AUDIO_PLAYBACK.
+ */
+async function playHighRiskVoiceAlert(voiceAlert) {
+  if (!voiceAlert) return;
+  const audioSrc = voiceAlert.startsWith('audio/mpeg;base64,')
+    ? voiceAlert
+    : `${BACKEND_URL}/audio/${voiceAlert}`;
+  try {
+    await chrome.offscreen.createDocument({
+      url: chrome.runtime.getURL('offscreen.html'),
+      reasons: ['AUDIO_PLAYBACK'],
+      justification: 'Play high-risk voice alert after page scan'
+    });
+  } catch (_) {
+    // Document may already exist
+  }
+  try {
+    chrome.runtime.sendMessage({ action: 'playVoice', audioSrc });
+  } catch (e) {
+    console.debug('[Kryptos-AI] Voice play sendMessage failed:', e);
+  }
 }
 
 /**
@@ -99,8 +128,10 @@ async function handleScoutSignal(signal, sender, sendResponse) {
     if (isLocalhost) {
       console.log('[Kryptos-AI Background] ⏭️ Skipping localhost URL:', signal.url);
       // Set safe badge for localhost
-      chrome.action.setBadgeText({ text: '✓', tabId: tabId || null });
-      chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId: tabId || null });
+      const lp1 = chrome.action.setBadgeText({ text: '✓', tabId: tabId || null });
+      if (lp1 && typeof lp1.catch === 'function') lp1.catch(() => {});
+      const lp2 = chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId: tabId || null });
+      if (lp2 && typeof lp2.catch === 'function') lp2.catch(() => {});
 
       // Store minimal state for popup
       if (tabId != null) {
@@ -147,6 +178,11 @@ async function handleScoutSignal(signal, sender, sendResponse) {
       riskScore: result.riskScore,
       hasPrivacyPolicy: signal.hasPrivacyPolicy
     }, tabId);
+
+    // Play voice alert immediately when high risk is found (extension hears alert right after analysis)
+    if ((result.riskScore ?? 0) >= 70 && (result.voiceAlert || result.voice_alert)) {
+      playHighRiskVoiceAlert(result.voiceAlert || result.voice_alert);
+    }
 
     sendResponse(result);
   } catch (err) {

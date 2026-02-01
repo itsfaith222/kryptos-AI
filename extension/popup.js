@@ -78,6 +78,21 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+/** Play voice alert in popup when we have high-risk result with voiceAlert. Plays immediately. */
+function playVoiceAlertIfHighRisk(result) {
+  if (!result || (result.riskScore ?? 0) < 70) return
+  const voiceAlert = result.voiceAlert || result.voice_alert
+  if (!voiceAlert) return
+  const audioSrc = voiceAlert.startsWith('audio/mpeg;base64,')
+    ? voiceAlert
+    : `${BACKEND_URL}/audio/${voiceAlert}`
+  try {
+    const audio = new Audio(audioSrc)
+    audio.volume = 1
+    audio.play().catch(() => {})
+  } catch (_) {}
+}
+
 /** Simple risk-only display (used for quick /api/scout/scan on page load) */
 function displayResult(container, result) {
   const risk = result.riskScore != null ? result.riskScore : 0;
@@ -119,6 +134,7 @@ analyzeBtn.addEventListener('click', async () => {
   try {
     const result = await fullScanToBackend({ url: '', scanType: 'message', content: text });
     displayFullResult(pasteResult, result);
+    playVoiceAlertIfHighRisk(result);
     showStatus('Analysis complete (saved to DB)', 'success');
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
@@ -240,7 +256,7 @@ removeScreenshotBtn.addEventListener('click', () => {
   showStatus('Screenshot removed', 'info');
 });
 
-// Analyze screenshot
+// Analyze screenshot – runs entirely in extension (no dashboard open). Backend saves to alert history.
 analyzeScreenshotBtn.addEventListener('click', async () => {
   if (!currentImageData) {
     showStatus('No screenshot selected', 'error');
@@ -249,17 +265,9 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
 
   analyzeScreenshotBtn.disabled = true;
   analyzeScreenshotBtn.textContent = 'Analyzing...';
-  screenshotResult.innerHTML = '<div class="loading"></div> Opening dashboard...';
+  screenshotResult.innerHTML = '<div class="loading"></div> Analyzing screenshot...';
 
   try {
-    // Open webapp first so user sees it immediately (smooth transition)
-    const webappTab = await chrome.tabs.create({
-      url: WEBAPP_URL + '/',
-      active: true
-    });
-
-    screenshotResult.innerHTML = '<div class="loading"></div> Running full analysis...';
-
     const result = await fullScanToBackend({
       url: '',
       scanType: 'image',
@@ -267,15 +275,17 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
       image_data: currentImageData
     });
 
-    const scanId = result.scanId || 'latest';
-
-    // Navigate the open tab to the scan result
-    if (webappTab && webappTab.id) {
-      chrome.tabs.update(webappTab.id, { url: `${WEBAPP_URL}/scan/${scanId}` });
+    displayFullResult(screenshotResult, result);
+    showStatus('Report saved to alert history', 'success');
+    const scanId = result && (result.scanId || result.scan_id);
+    if (scanId) {
+      const link = document.createElement('p');
+      link.className = 'screenshot-view-dashboard';
+      link.innerHTML = `<a href="${WEBAPP_URL}/scan/${scanId}" target="_blank" rel="noopener">View in dashboard →</a>`;
+      link.style.marginTop = '8px';
+      link.style.fontSize = '12px';
+      screenshotResult.appendChild(link);
     }
-
-    screenshotResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete!</div>';
-    showStatus('Full analysis opened in dashboard', 'success');
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
     screenshotResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
@@ -334,6 +344,7 @@ async function loadCurrentPageStatus() {
     if (tab.url && tab.url.startsWith('http')) {
       if (tabState && tabState.fullResult && !tabState.fullResult.error) {
         displayFullResult(pageResult, tabState.fullResult);
+        // Voice for page scan is played by background when scan completes; don't replay every time popup opens
       } else if (tabState && tabState.skippedReason === 'localhost') {
         pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Localhost - No scan needed</div>';
       } else {

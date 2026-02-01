@@ -210,6 +210,15 @@ async def educator_chat(request: dict):
     if not msg or len(msg) > 2000:
         raise HTTPException(status_code=400, detail="Message required (max 2000 chars)")
 
+    age = request.get("age")
+    if age is not None:
+        try:
+            age = int(age)
+            if age < 1 or age > 120:
+                age = None
+        except (TypeError, ValueError):
+            age = None
+
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="Educator not configured (OPENROUTER_API_KEY)")
@@ -219,6 +228,15 @@ async def educator_chat(request: dict):
         "Answer user questions about phishing, scams, malware, and privacy in 2-5 sentences. "
         "Be direct and helpful. No fluff."
     )
+    if age is not None:
+        system += (
+            f" The user is approximately {age} years old. "
+            "Use language and examples appropriate for that age: simpler words and shorter sentences for younger users, more detail for older users."
+        )
+    else:
+        system += (
+            " If the user has not shared their age yet, ask once in a friendly way so you can tailor your answers."
+        )
     try:
         r = req.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -241,8 +259,8 @@ async def educator_chat(request: dict):
 
 
 @app.get("/history")
-async def get_history(limit: int = 50):
-    """Get recent scan history from DB (for dashboard)."""
+async def get_history(limit: int = 100):
+    """Get recent scan history from DB (for dashboard). Includes voiceAlert for high-risk scans."""
     try:
         from database import get_recent_scans
         scans = await get_recent_scans(limit=limit)

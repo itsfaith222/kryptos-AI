@@ -178,7 +178,26 @@ def _openrouter_explanation(analyst: AnalystOutput, privacy: Dict[str, Any], lan
         f"- {e.get('finding','')}" for e in (analyst.evidence or [])[:8] if e.get("finding")
     )
 
-    prompt = f"""
+    is_high_risk = (analyst.riskScore or 0) >= 70
+    if is_high_risk:
+        prompt = f"""
+Write a STRONG security ALERT in {lang} that will be read aloud as a voice alert.
+Rules:
+- Start with a clear warning (e.g. "Alert. High risk detected." or "Warning. This site may be dangerous.")
+- Use urgent, direct tone. 3–4 short sentences. Each sentence should stand alone when spoken.
+- Say what the risk is (phishing / scam / malware / privacy) and what the user should do (do not proceed, close the page, do not enter details).
+- No filler. No empowerment language. This is for a voice alert so be punchy and clear.
+
+Threat type: {analyst.threatType}
+Risk score: {analyst.riskScore}/100
+
+Evidence:
+{evidence_lines if evidence_lines else "- (no evidence provided)"}
+
+Privacy: WHAT: {privacy['what'][:5]} | WHO: {privacy['who'][:5]} | DELETE: {privacy['can_delete']}
+""".strip()
+    else:
+        prompt = f"""
 Write a short security warning in {lang}.
 Rules:
 - Security & privacy risk only
@@ -292,12 +311,16 @@ def _log_learning(user_id: str, analyst: AnalystOutput, tags: List[str]) -> None
 
 
 def _voice_alert(text: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Generate voice via ElevenLabs; store in GridFS if Mongo configured; return file_id or None."""
+    """Generate voice via ElevenLabs; store in GridFS if Mongo configured; return file_id or None.
+    For high-risk alerts we use the first 2 sentences so the voice alert is stronger and clearer."""
     if not EDUCATOR_VOICE_ENABLED or not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
         return None
-    short = (text.split(".")[0] or text).strip()
-    if len(short) > 240:
-        short = short[:240] + "…"
+    # Use first 2 sentences for stronger voice alert (was 1 sentence / 240 chars)
+    parts = [p.strip() for p in (text or "").split(".") if p.strip()]
+    short = ". ".join(parts[:2]) if len(parts) >= 2 else (parts[0] if parts else text)
+    short = (short or text).strip()
+    if len(short) > 380:
+        short = short[:380] + "…"
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
     headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"}
     payload = {"text": short, "model_id": "eleven_multilingual_v2"}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { APP_NAME } from './config'
 import { ToastProvider, useToast } from './components/Toasts'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -12,7 +12,26 @@ function RiskBadge({ score }) {
   return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/50">Low</span>
 }
 
-function HistoryPanel({ history, onNewScan }) {
+const DISMISSED_STORAGE_KEY = 'kryptos-dismissed-alerts'
+
+function loadDismissedIds() {
+  try {
+    const raw = sessionStorage.getItem(DISMISSED_STORAGE_KEY)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw)
+    return new Set(Array.isArray(arr) ? arr : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDismissedIds(ids) {
+  try {
+    sessionStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch (_) {}
+}
+
+function HistoryPanel({ history, onNewScan, onDismissAlert }) {
   useWebSocket((payload) => {
     onNewScan(payload)
   })
@@ -32,7 +51,7 @@ function HistoryPanel({ history, onNewScan }) {
   return (
     <div className="flex flex-col gap-3 overflow-y-auto p-4">
       {history.map((alert) => (
-        <AlertCard key={alert.scanId || alert.timestamp + alert.url} alert={alert} />
+        <AlertCard key={alert.scanId || alert.timestamp + alert.url} alert={alert} onDismiss={onDismissAlert} />
       ))}
     </div>
   )
@@ -64,7 +83,7 @@ function formatAlertTime(isoString) {
   }
 }
 
-function AlertCard({ alert }) {
+function AlertCard({ alert, onDismiss }) {
   const risk = alert.riskScore ?? 0
   const voiceAlert = alert.voiceAlert
   const hasVoice = Boolean(voiceAlert)
@@ -82,14 +101,27 @@ function AlertCard({ alert }) {
   const detailUrl = alert.scanId ? `/scan/${alert.scanId}` : null
 
   return (
-    <div className="rounded-xl border border-slate-700/80 bg-slate-800/40 p-4 hover:border-slate-600/80 transition">
-      <div className="flex items-start justify-between gap-2 mb-2">
+    <div className="rounded-xl border border-slate-700/80 bg-slate-800/50 p-4 hover:border-slate-600 transition relative group">
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={() => onDismiss(alert)}
+          className={`absolute top-3 right-3 p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-700/80 transition focus:outline-none ${risk >= 70 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}`}
+          title="Dismiss alert"
+          aria-label="Dismiss alert"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+      <div className={`flex items-start justify-between gap-2 mb-2 ${onDismiss ? 'pr-8' : ''}`}>
         <div>
-          <p className="text-slate-300 text-sm font-medium truncate max-w-[180px]" title={alert.url || '—'}>
+          <p className="text-slate-200 text-sm font-medium truncate max-w-[180px]" title={alert.url || '—'}>
             {hostname}
           </p>
           <p className="text-slate-500 text-xs">{alert.threatType || 'unknown'}</p>
-          <p className="text-slate-600 text-xs mt-0.5" title={alert.timestamp || ''}>
+          <p className="text-slate-500 text-xs mt-0.5" title={alert.timestamp || ''}>
             {formatAlertTime(alert.timestamp)}
           </p>
         </div>
@@ -118,8 +150,22 @@ function AlertCard({ alert }) {
   )
 }
 
+const INITIAL_EDUCATOR_MESSAGE = "Hi! To give you the best answers, how old are you? You can just type a number (e.g. 12 or 25)."
+
+/** Try to parse an age (1–120) from the first user message when we don't have age yet. */
+function parseAgeFromMessage(text) {
+  if (!text || typeof text !== 'string') return null
+  const match = text.trim().match(/\b(1?\d?\d|1[01]\d|120)\b/)
+  if (!match) return null
+  const n = parseInt(match[1], 10)
+  return n >= 1 && n <= 120 ? n : null
+}
+
 function EducatorChat({ addToast }) {
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: INITIAL_EDUCATOR_MESSAGE },
+  ])
+  const [userAge, setUserAge] = useState(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
@@ -133,6 +179,15 @@ function EducatorChat({ addToast }) {
     const text = input.trim()
     if (!text || loading) return
 
+    let ageToSend = userAge
+    if (userAge == null) {
+      const parsed = parseAgeFromMessage(text)
+      if (parsed != null) {
+        setUserAge(parsed)
+        ageToSend = parsed
+      }
+    }
+
     const userMsg = { role: 'user', content: text }
     setMessages((m) => [...m, userMsg])
     setInput('')
@@ -142,7 +197,7 @@ function EducatorChat({ addToast }) {
       const res = await fetch(`${API_BASE}/educator/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, age: ageToSend ?? undefined }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -162,12 +217,6 @@ function EducatorChat({ addToast }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="text-center text-slate-500 text-sm py-8">
-            <p>Ask the Educator about security and privacy.</p>
-            <p className="text-xs mt-1">e.g. &quot;How do I spot a phishing email?&quot;</p>
-          </div>
-        )}
         {messages.map((msg, i) => (
           <div
             key={i}
@@ -348,33 +397,86 @@ function ScanDetailPage({ scanId }) {
   )
 }
 
+function sortAlertHistory(rows) {
+  if (!Array.isArray(rows) || rows.length <= 1) return rows || []
+  return [...rows].sort((a, b) => {
+    const riskA = a.riskScore ?? 0
+    const riskB = b.riskScore ?? 0
+    const voiceA = Boolean(a.voiceAlert)
+    const voiceB = Boolean(b.voiceAlert)
+    // High risk (70+) first, then items with voice, then by timestamp (newest first)
+    if (riskA >= 70 && riskB < 70) return -1
+    if (riskA < 70 && riskB >= 70) return 1
+    if (voiceA && !voiceB) return -1
+    if (!voiceA && voiceB) return 1
+    const tsA = new Date(a.timestamp || 0).getTime()
+    const tsB = new Date(b.timestamp || 0).getTime()
+    return tsB - tsA
+  })
+}
+
 function Dashboard() {
   useEffect(() => {
     document.title = APP_NAME ? `${APP_NAME} Dashboard` : 'Kryptos-AI Dashboard'
   }, [])
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [dismissedIds, setDismissedIds] = useState(loadDismissedIds)
   const { addToast } = useToast()
 
-  useEffect(() => {
-    async function fetchHistory() {
-      try {
-        const res = await fetch(`${API_BASE}/history`)
-        const data = await res.json().catch(() => [])
-        setHistory(Array.isArray(data) ? data : [])
-      } catch {
-        setHistory([])
-      } finally {
-        setLoading(false)
-      }
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/history`)
+      const data = await res.json().catch(() => [])
+      const list = Array.isArray(data) ? data : []
+      const filtered = list.filter((p) => !dismissedIds.has(p.scanId))
+      setHistory(sortAlertHistory(filtered))
+    } catch {
+      setHistory([])
+    } finally {
+      setLoading(false)
     }
+  }, [dismissedIds])
+
+  useEffect(() => {
     fetchHistory()
-  }, [])
+  }, [fetchHistory])
+
+  // Refetch alert history when window gains focus so we always see latest (including voice alerts)
+  useEffect(() => {
+    const onFocus = () => {
+      setLoading(true)
+      fetchHistory()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [fetchHistory])
 
   function onNewScan(payload) {
-    setHistory((prev) => [payload, ...prev].slice(0, 100))
+    if (!payload?.scanId) return
+    if (dismissedIds.has(payload.scanId)) return
+    setHistory((prev) => sortAlertHistory([payload, ...prev.filter((p) => p.scanId !== payload.scanId)].slice(0, 100)))
     const risk = payload?.riskScore ?? 0
-    addToast(`New scan: risk ${risk}/100 · ${payload?.threatType || 'unknown'}`, 'success')
+    const hasVoice = Boolean(payload?.voiceAlert)
+    addToast(
+      risk >= 70
+        ? `High risk alert: ${payload?.threatType || 'unknown'}${hasVoice ? ' · voice available' : ''}`
+        : `New scan: risk ${risk}/100 · ${payload?.threatType || 'unknown'}`,
+      risk >= 70 ? 'error' : 'success'
+    )
+  }
+
+  function onDismissAlert(alert) {
+    const id = alert?.scanId
+    if (id) {
+      setDismissedIds((prev) => {
+        const next = new Set(prev)
+        next.add(id)
+        saveDismissedIds(next)
+        return next
+      })
+    }
+    setHistory((prev) => prev.filter((p) => (id != null ? p.scanId !== id : p !== alert)))
   }
 
   return (
@@ -416,7 +518,7 @@ function Dashboard() {
                   </svg>
                 </div>
               ) : (
-                <HistoryPanel history={history} onNewScan={onNewScan} />
+                <HistoryPanel history={history} onNewScan={onNewScan} onDismissAlert={onDismissAlert} />
               )}
             </div>
           </div>
