@@ -82,6 +82,44 @@ async function postFullScan(payload) {
 async function handleScoutSignal(signal, sender, sendResponse) {
   const tabId = sender.tab && sender.tab.id;
 
+  console.log('[Guardian AI Background] 🔍 Received Scout signal from tab', tabId, {
+    url: signal.url,
+    isLogin: signal.isLogin,
+    hasPrivacyPolicy: signal.hasPrivacyPolicy,
+    keywords: signal.detectedKeywords?.length || 0
+  });
+
+  // ===== Skip localhost URLs =====
+  try {
+    const url = new URL(signal.url);
+    const isLocalhost = url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.endsWith('.local');
+
+    if (isLocalhost) {
+      console.log('[Guardian AI Background] ⏭️ Skipping localhost URL:', signal.url);
+      // Set safe badge for localhost
+      chrome.action.setBadgeText({ text: '✓', tabId: tabId || null });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId: tabId || null });
+
+      // Store minimal state for popup
+      if (tabId != null) {
+        tabState.set(tabId, {
+          url: signal.url,
+          riskScore: 0,
+          hasPrivacyPolicy: false,
+          skippedReason: 'localhost'
+        });
+      }
+
+      return; // Exit early, don't scan
+    }
+  } catch (e) {
+    // Invalid URL, continue with scan anyway
+    console.log('[Guardian AI Background] ⚠️ Could not parse URL, scanning anyway:', signal.url);
+  }
+  // ===== END localhost check =====
+
   setBadgeScanning(tabId);
 
   try {
@@ -89,6 +127,11 @@ async function handleScoutSignal(signal, sender, sendResponse) {
       url: signal.url || '',
       scanType: 'page',
       content: ''
+    });
+
+    console.log('[Guardian AI Background] ✅ Full scan complete for tab', tabId, {
+      riskScore: result.riskScore,
+      threatType: result.threatType
     });
 
     if (tabId != null) {
@@ -107,7 +150,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
 
     sendResponse(result);
   } catch (err) {
-    console.error('[Guardian AI] Full scan failed:', err);
+    console.error('[Guardian AI Background] ❌ Full scan failed for tab', tabId, err);
     setBadgeFromResult({ riskScore: 0, hasPrivacyPolicy: signal.hasPrivacyPolicy }, tabId);
     if (tabId != null) {
       tabState.set(tabId, { hasPrivacyPolicy: signal.hasPrivacyPolicy, riskScore: 0, url: signal.url });
@@ -194,8 +237,77 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+  if (request.action === 'checkLinkSafety') {
+    // Quick link safety check for hover tooltips
+    checkLinkSafety(request.url).then(sendResponse).catch((err) => {
+      console.error('[Guardian AI] Link safety check failed:', err);
+      sendResponse({ risk: 0, reason: 'Check failed' });
+    });
+    return true;
+  }
   return false;
 });
+
+// Link safety cache (5-minute TTL)
+const linkSafetyCache = new Map();
+
+/**
+ * Quick link safety check for hover tooltips
+ */
+async function checkLinkSafety(url) {
+  // Check cache first
+  const cached = linkSafetyCache.get(url);
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+    return { ...cached.result, cached: true };
+  }
+
+  try {
+    // Use the existing Scout scan endpoint for quick check
+    const result = await postScoutScan({
+      url: url,
+      isLogin: false,
+      hasPrivacyPolicy: false,
+      detectedKeywords: [],
+      detectedScam: [],
+      detectedMalware: []
+    });
+
+    const riskScore = result.riskScore || 0;
+    let status = 'safe';
+
+    if (riskScore > 70) {
+      status = 'dangerous';
+    } else if (riskScore >= 40) {
+      status = 'suspicious';
+    }
+
+    const response = {
+      riskScore,
+      status,
+      reason: result.explanation || (status === 'safe' ? 'Domain appears safe' : 'Suspicious indicators detected')
+    };
+
+    // Cache result
+    linkSafetyCache.set(url, {
+      result: response,
+      timestamp: Date.now()
+    });
+
+    return response;
+  } catch (error) {
+    return { riskScore: 0, status: 'unknown', reason: 'Unable to check link' };
+  }
+}
+
+// Clean up link safety cache periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [url, data] of linkSafetyCache.entries()) {
+    if (now - data.timestamp > 5 * 60 * 1000) {
+      linkSafetyCache.delete(url);
+    }
+  }
+}, 60 * 1000); // Clean every minute
 
 // Default badge on load: Scanning
 setBadgeScanning();
