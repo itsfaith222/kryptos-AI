@@ -194,8 +194,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+  if (request.action === 'checkLinkSafety') {
+    // Quick link safety check for hover tooltips
+    checkLinkSafety(request.url).then(sendResponse).catch((err) => {
+      console.error('[Guardian AI] Link safety check failed:', err);
+      sendResponse({ risk: 0, reason: 'Check failed' });
+    });
+    return true;
+  }
   return false;
 });
+
+// Link safety cache (5-minute TTL)
+const linkSafetyCache = new Map();
+
+/**
+ * Quick link safety check for hover tooltips
+ */
+async function checkLinkSafety(url) {
+  // Check cache first
+  const cached = linkSafetyCache.get(url);
+  if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+    return { ...cached.result, cached: true };
+  }
+
+  try {
+    // Use the existing Scout scan endpoint for quick check
+    const result = await postScoutScan({
+      url: url,
+      isLogin: false,
+      hasPrivacyPolicy: false,
+      detectedKeywords: [],
+      detectedScam: [],
+      detectedMalware: []
+    });
+
+    const risk = result.riskScore || 0;
+    let reason = 'Domain appears safe';
+
+    if (risk > 70) {
+      reason = 'Suspicious domain detected';
+    } else if (risk >= 40) {
+      reason = 'Exercise caution with this link';
+    }
+
+    const response = { risk, reason };
+
+    // Cache result
+    linkSafetyCache.set(url, {
+      result: response,
+      timestamp: Date.now()
+    });
+
+    return response;
+  } catch (error) {
+    return { risk: 0, reason: 'Unable to check link' };
+  }
+}
+
+// Clean up link safety cache periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [url, data] of linkSafetyCache.entries()) {
+    if (now - data.timestamp > 5 * 60 * 1000) {
+      linkSafetyCache.delete(url);
+    }
+  }
+}, 60 * 1000); // Clean every minute
 
 // Default badge on load: Scanning
 setBadgeScanning();

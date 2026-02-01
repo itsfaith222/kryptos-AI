@@ -146,6 +146,9 @@ class ScoutAgent:
             "logoQuality": "high",
             "suspiciousImages": False,
             "extractedText": "",
+            "extractedUrls": [],
+            "extractedPhoneNumbers": [],
+            "hasEmbeddedText": False,
             "suspiciousPatterns": [],
             "source": "image"
         }
@@ -158,11 +161,11 @@ class ScoutAgent:
 
         prompt = """Analyze this image for potential scams or phishing attempts.
 Look for: company logos (legitimate or fake), urgency language, requests for personal info, suspicious URLs/phone numbers, poor quality or spelling errors.
-Extract any visible text. Respond with JSON only:
-{"hasLogo": true/false, "logoQuality": "high/medium/low", "suspiciousElements": [], "extractedText": "up to 500 chars", "overallAssessment": "legitimate/suspicious/scam"}"""
+Extract ALL visible text including URLs and phone numbers. Respond with JSON only:
+{"hasLogo": true/false, "logoQuality": "high/medium/low", "suspiciousElements": [], "extractedText": "all visible text", "urls": [], "phoneNumbers": [], "overallAssessment": "legitimate/suspicious/scam"}"""
 
         # OpenRouter vision: image in content as image_url (data URL)
-        url = f"data:image/png;base64,{image_data}" if "base64," not in image_data[:20] else image_data
+        image_url = f"data:image/png;base64,{image_data}" if "base64," not in image_data[:20] else image_data
         content = [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": image_url}}
@@ -178,19 +181,51 @@ Extract any visible text. Respond with JSON only:
             resp.raise_for_status()
             raw = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
             if not raw:
-                raise RuntimeError("Scout image: not generating — OpenRouter returned empty")
+                raise RuntimeError("Scout image: OpenRouter returned empty response")
+            
+            # Parse JSON response
             result = json.loads(raw.strip())
             signals["hasLogo"] = result.get("hasLogo", False)
             signals["logoQuality"] = result.get("logoQuality", "high")
             signals["suspiciousImages"] = result.get("overallAssessment") != "legitimate"
-            signals["extractedText"] = (result.get("extractedText") or "")[:500]
+            signals["extractedText"] = (result.get("extractedText") or "")[:1000]
+            signals["hasEmbeddedText"] = bool(signals["extractedText"])
             signals["suspiciousPatterns"] = result.get("suspiciousElements", [])
+            signals["extractedUrls"] = result.get("urls", [])
+            signals["extractedPhoneNumbers"] = result.get("phoneNumbers", [])
+            
+            # Additional pattern detection on extracted text
+            if signals["extractedText"]:
+                text_lower = signals["extractedText"].lower()
+                
+                # Detect urgency words in extracted text
+                urgency_words = ["urgent", "immediate", "verify", "suspended", "expires", "limited time", "act now"]
+                found_urgency = [word for word in urgency_words if word in text_lower]
+                if found_urgency:
+                    signals["suspiciousPatterns"].append(f"Urgency language detected: {', '.join(found_urgency)}")
+                
+                # Detect credential requests
+                if any(word in text_lower for word in ["password", "login", "credentials", "verify account"]):
+                    signals["suspiciousPatterns"].append("Credential request detected")
+                
+                # Extract URLs using regex if not found by AI
+                if not signals["extractedUrls"]:
+                    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+                    found_urls = re.findall(url_pattern, signals["extractedText"])
+                    signals["extractedUrls"] = found_urls[:5]  # Limit to 5 URLs
+                
+                # Extract phone numbers if not found by AI
+                if not signals["extractedPhoneNumbers"]:
+                    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b|\b\(\d{3}\)\s*\d{3}[-.]?\d{4}\b'
+                    found_phones = re.findall(phone_pattern, signals["extractedText"])
+                    signals["extractedPhoneNumbers"] = found_phones[:3]  # Limit to 3 phone numbers
+                    
         except req.exceptions.RequestException as e:
             print(f"Scout image: OpenRouter request failed: {e}")
-            raise RuntimeError("Scout image: not generating — OpenRouter request failed") from e
+            raise RuntimeError(f"Scout image: OpenRouter request failed - {str(e)}") from e
         except (json.JSONDecodeError, KeyError) as e:
             print(f"Scout image: parse error: {e}")
-            raise RuntimeError("Scout image: not generating — invalid response format") from e
+            raise RuntimeError("Scout image: invalid response format from OpenRouter") from e
 
         return signals
     
@@ -288,20 +323,34 @@ Extract any visible text. Respond with JSON only:
     
     async def get_predictive_warnings(self, user_context: Dict) -> Optional[str]:
         """
-        Get predictive warnings based on trending threats
+        Get predictive warnings based on trending threats from MongoDB
         
         Args:
-            user_context: User location/context (for future MongoDB integration)
+            user_context: User location/context for filtering threats
             
         Returns:
             Predictive warning message or None
         """
-        # This will query MongoDB in the final implementation
-        # For now, return mock warning
         try:
-            # Mock trending threats
+            # Try to query MongoDB for trending threats
+            trending_threats = await self.query_trending_threats(user_context)
+            
+            if trending_threats:
+                # Pick the most relevant threat (highest count)
+                top_threat = trending_threats[0]
+                brand = top_threat.get("brand", "")
+                threat_type = top_threat.get("threat_type", "scam")
+                count = top_threat.get("count", 0)
+                
+                # Generate contextual warning
+                if brand:
+                    return f"⚠️ Fake {brand} {threat_type}s trending ({count}+ reports)"
+                else:
+                    return f"⚠️ {threat_type.capitalize()} campaigns detected in your area"
+            
+            # Fallback to mock warnings if MongoDB unavailable or no threats found
             import random
-            threats = [
+            mock_threats = [
                 "Fake Netflix billing scams trending this week",
                 "Amazon package delivery scams up 150%",
                 "Tax refund phishing campaigns detected",
@@ -309,9 +358,66 @@ Extract any visible text. Respond with JSON only:
                 "Fake PayPal invoice scams spreading"
             ]
             
-            return random.choice(threats) if random.random() > 0.3 else None
-        except:
+            return random.choice(mock_threats) if random.random() > 0.5 else None
+            
+        except Exception as e:
+            # Graceful degradation - don't crash if MongoDB fails
+            print(f"Scout predictive warnings: {e}")
             return None
+    
+    async def query_trending_threats(self, user_context: Dict) -> List[Dict]:
+        """
+        Query MongoDB for trending threats
+        
+        Args:
+            user_context: User location/context (region, etc.)
+            
+        Returns:
+            List of trending threats, sorted by count (descending)
+        """
+        try:
+            # Import MongoDB client
+            from pymongo import MongoClient
+            from pymongo.server_api import ServerApi
+            from datetime import datetime, timedelta
+            import os
+            
+            # Get MongoDB URI
+            mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+            if not mongodb_uri or mongodb_uri == "mongodb://localhost:27017":
+                # MongoDB not configured, return empty list
+                return []
+            
+            # Connect to MongoDB
+            client = MongoClient(mongodb_uri, server_api=ServerApi("1"), serverSelectionTimeoutMS=2000)
+            db = client["M0"]
+            collection = db["trending_threats"]
+            
+            # Query for recent threats (last 7 days)
+            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            
+            query = {
+                "timestamp": {"$gte": seven_days_ago}
+            }
+            
+            # Filter by region if provided
+            region = user_context.get("region")
+            if region:
+                query["region"] = region
+            
+            # Get top 5 threats sorted by count
+            cursor = collection.find(query).sort("count", -1).limit(5)
+            threats = list(cursor)
+            
+            # Close connection
+            client.close()
+            
+            return threats
+            
+        except Exception as e:
+            # Graceful degradation - MongoDB unavailable
+            print(f"Scout MongoDB query failed: {e}")
+            return []
     
     def _is_typosquatted(self, text: str, company: str) -> bool:
         """

@@ -162,6 +162,107 @@ function showStatus(message, type = 'info') {
   }
 }
 
+// ===== Screenshot Upload Functionality =====
+const screenshotBtn = document.getElementById('screenshot-btn');
+const screenshotInput = document.getElementById('screenshot-input');
+const screenshotPreview = document.getElementById('screenshot-preview');
+const previewImage = document.getElementById('preview-image');
+const removeScreenshotBtn = document.getElementById('remove-screenshot');
+const analyzeScreenshotBtn = document.getElementById('analyze-screenshot-btn');
+const screenshotResult = document.getElementById('screenshot-result');
+
+let currentImageData = null;
+
+// Trigger file input when button clicked
+screenshotBtn.addEventListener('click', () => {
+  screenshotInput.click();
+});
+
+// Handle file selection
+screenshotInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Validate file type
+  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    showStatus('Please select a valid image file (PNG, JPG, WEBP)', 'error');
+    return;
+  }
+
+  // Validate file size (5MB max)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (file.size > maxSize) {
+    showStatus('Image too large. Please select an image under 5MB', 'error');
+    return;
+  }
+
+  try {
+    // Read file and convert to base64
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target.result;
+      currentImageData = base64Data;
+
+      // Show preview
+      previewImage.src = base64Data;
+      screenshotPreview.style.display = 'block';
+      analyzeScreenshotBtn.style.display = 'block';
+      screenshotResult.innerHTML = '';
+      
+      showStatus('Screenshot loaded. Click "Analyze Screenshot" to scan.', 'success');
+    };
+
+    reader.onerror = () => {
+      showStatus('Failed to read image file', 'error');
+    };
+
+    reader.readAsDataURL(file);
+  } catch (error) {
+    showStatus(`Error loading image: ${error.message}`, 'error');
+  }
+});
+
+// Remove screenshot
+removeScreenshotBtn.addEventListener('click', () => {
+  currentImageData = null;
+  screenshotPreview.style.display = 'none';
+  analyzeScreenshotBtn.style.display = 'none';
+  screenshotInput.value = '';
+  screenshotResult.innerHTML = '';
+  showStatus('Screenshot removed', 'info');
+});
+
+// Analyze screenshot
+analyzeScreenshotBtn.addEventListener('click', async () => {
+  if (!currentImageData) {
+    showStatus('No screenshot selected', 'error');
+    return;
+  }
+
+  analyzeScreenshotBtn.disabled = true;
+  analyzeScreenshotBtn.textContent = 'Analyzing...';
+  screenshotResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+
+  try {
+    const result = await fullScanToBackend({
+      url: '',
+      scanType: 'image',
+      content: '',
+      image_data: currentImageData
+    });
+
+    displayFullResult(screenshotResult, result);
+    showStatus('Screenshot analysis complete (saved to DB)', 'success');
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+    screenshotResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+  } finally {
+    analyzeScreenshotBtn.disabled = false;
+    analyzeScreenshotBtn.textContent = 'Analyze Screenshot';
+  }
+});
+
 /** On popup open: run full pipeline (Scout → Analyst → Educator) for current tab and show full result. No button click. */
 async function loadCurrentPageStatus() {
   try {
