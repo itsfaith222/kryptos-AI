@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import requests
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
 from dotenv import load_dotenv
 
 # Load .env for local runs (safe in prod too; it won't override real env vars)
@@ -304,74 +308,18 @@ async def explain(
     #     voice = _voice_alert(explanation)
 
     return EducatorOutput(
-        explanation=str(data.get("explanation", "")).strip(),
-        nextSteps=[str(x).strip() for x in data.get("nextSteps", [])],
-        learningPoints=[str(x).strip() for x in data.get("learningPoints", [])],
-        voiceAlert=None,
+        explanation=explanation,
+        nextSteps=next_steps,
+        learningPoints=learning_points,
+        voiceAlert=voice,
     )
-
-
-def _elevenlabs_tts(text: str, out_path: str) -> Optional[str]:
-    api_key = env_str("ELEVENLABS_API_KEY", "")
-    voice_id = env_str("ELEVENLABS_VOICE_ID", "")
-    if not api_key or not voice_id:
-        return None
-
-    r = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-        },
-        json={"text": text},
-        timeout=45,
-    )
-
-    if r.status_code != 200:
-        return None
-
-    with open(out_path, "wb") as f:
-        f.write(r.content)
-
-    return out_path.strip()
-
-
-def explain(analyst: AnalystOutput) -> EducatorOutput:
-    load_env()
-    base_dir = safe_base_dir()
-    ensure_dirs(base_dir)
-
-    use_llm = env_bool("ENABLE_LLM", True)
-    use_voice = env_bool("ENABLE_ELEVENLABS", False)
-    reuse_voice = env_bool("EDUCATOR_VOICE_SKIP_IF_EXISTS", True)
-
-    if use_llm and not env_str("OPENROUTER_API_KEY", ""):
-        use_llm = False
-
-    edu = _llm_explain_openrouter(analyst) if use_llm else _template_explain(analyst)
-
-    if use_voice:
-        mp3 = audio_path(base_dir, f"educator_alert_{analyst.analysisId}.mp3")
-        if reuse_voice and os.path.exists(mp3):
-            edu.voiceAlert = mp3.strip()
-        else:
-            edu.voiceAlert = _elevenlabs_tts(
-                f"Security alert. Privacy risk detected. {edu.nextSteps[0]}",
-                mp3,
-            )
-
-    if edu.voiceAlert:
-        edu.voiceAlert = str(edu.voiceAlert).strip()
-
-    return edu
 
 
 class EducatorAgent:
     async def explain(
         self,
-        analyst: AnalystOutput,
+        analyst_output: AnalystOutput,
         user_id: Optional[str] = None,
-        lang: str = "en",
+        lang: Optional[str] = None,
     ) -> EducatorOutput:
-        return explain(analyst)
+        return await explain(analyst_output, user_id=user_id or "anonymous", lang=lang)
