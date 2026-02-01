@@ -323,7 +323,7 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
     
     async def get_predictive_warnings(self, user_context: Dict) -> Optional[str]:
         """
-        Get predictive warnings based on trending threats from MongoDB
+        Get predictive warnings based on trending threats from MongoDB (last 60 minutes)
         
         Args:
             user_context: User location/context for filtering threats
@@ -332,21 +332,18 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
             Predictive warning message or None
         """
         try:
-            # Try to query MongoDB for trending threats
+            # Try to query MongoDB for trending threats (last 60 minutes)
             trending_threats = await self.query_trending_threats(user_context)
             
             if trending_threats:
-                # Pick the most relevant threat (highest count)
+                # Pick the most frequent threat
                 top_threat = trending_threats[0]
-                brand = top_threat.get("brand", "")
                 threat_type = top_threat.get("threat_type", "scam")
                 count = top_threat.get("count", 0)
+                avg_risk = int(top_threat.get("avgRiskScore", 0))
                 
-                # Generate contextual warning
-                if brand:
-                    return f"⚠️ Fake {brand} {threat_type}s trending ({count}+ reports)"
-                else:
-                    return f"⚠️ {threat_type.capitalize()} campaigns detected in your area"
+                # Generate contextual warning with real-time data
+                return f"⚠️ Warning: {count} similar {threat_type} scam(s) detected in the last hour (avg risk: {avg_risk}/100)"
             
             # Fallback to mock warnings if MongoDB unavailable or no threats found
             import random
@@ -367,13 +364,13 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
     
     async def query_trending_threats(self, user_context: Dict) -> List[Dict]:
         """
-        Query MongoDB for trending threats
+        Query MongoDB scans collection for trending threats in last 60 minutes
         
         Args:
             user_context: User location/context (region, etc.)
             
         Returns:
-            List of trending threats, sorted by count (descending)
+            List of trending threats with counts, sorted by frequency (descending)
         """
         try:
             # Import MongoDB client
@@ -391,23 +388,45 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
             # Connect to MongoDB
             client = MongoClient(mongodb_uri, server_api=ServerApi("1"), serverSelectionTimeoutMS=2000)
             db = client["M0"]
-            collection = db["trending_threats"]
+            collection = db["scans"]
             
-            # Query for recent threats (last 7 days)
-            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            # Query for scans from last 60 minutes
+            sixty_minutes_ago = datetime.utcnow() - timedelta(minutes=60)
             
-            query = {
-                "timestamp": {"$gte": seven_days_ago}
-            }
+            # Aggregate to find most frequent threatTypes
+            pipeline = [
+                {
+                    "$match": {
+                        "timestamp": {"$gte": sixty_minutes_ago.isoformat()},
+                        "threatType": {"$ne": "safe"}  # Exclude safe scans
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$threatType",
+                        "count": {"$sum": 1},
+                        "avgRiskScore": {"$avg": "$riskScore"}
+                    }
+                },
+                {
+                    "$sort": {"count": -1}
+                },
+                {
+                    "$limit": 5
+                }
+            ]
             
-            # Filter by region if provided
-            region = user_context.get("region")
-            if region:
-                query["region"] = region
+            cursor = collection.aggregate(pipeline)
+            threats = []
             
-            # Get top 5 threats sorted by count
-            cursor = collection.find(query).sort("count", -1).limit(5)
-            threats = list(cursor)
+            for doc in cursor:
+                threats.append({
+                    "threat_type": doc["_id"],
+                    "count": doc["count"],
+                    "avgRiskScore": doc.get("avgRiskScore", 0),
+                    "brand": "",  # Not tracked in scans collection
+                    "region": ""  # Not tracked in scans collection
+                })
             
             # Close connection
             client.close()

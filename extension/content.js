@@ -99,8 +99,22 @@
       detectedMalware: keywords.malware
     };
 
-    chrome.runtime.sendMessage(payload, () => {
-      if (chrome.runtime.lastError) { /* background not ready yet */ }
+    console.log('[Guardian AI Content] 🔍 Sending Scout signal to background:', {
+      url: payload.url,
+      isLogin: payload.isLogin,
+      hasPrivacyPolicy: payload.hasPrivacyPolicy,
+      keywordCount: keywords.all.length,
+      phishing: keywords.phishing.length,
+      scam: keywords.scam.length,
+      malware: keywords.malware.length
+    });
+
+    chrome.runtime.sendMessage(payload, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Guardian AI Content] ⚠️ Background not ready:', chrome.runtime.lastError.message);
+      } else {
+        console.log('[Guardian AI Content] ✅ Scout signal acknowledged by background');
+      }
     });
   }
 
@@ -236,6 +250,19 @@
 
     // Debounce: wait 500ms before showing tooltip
     hoverTimeout = setTimeout(() => {
+      // Perform lightweight client-side checks first
+      const quickCheck = performQuickLinkCheck(href);
+
+      if (quickCheck.suspicious) {
+        // Show immediate warning for obviously suspicious links
+        console.log('[Guardian AI Content] 🔗 Suspicious link detected:', href, quickCheck.reason);
+        showLinkTooltip(link, {
+          risk: quickCheck.risk,
+          reason: `⚠️ Security Tip: ${quickCheck.reason}`
+        });
+        return;
+      }
+
       // Check cache first
       if (linkCache.has(href)) {
         showLinkTooltip(link, linkCache.get(href));
@@ -243,10 +270,16 @@
       }
 
       // Request safety check from background
+      console.log('[Guardian AI Content] 🔗 Requesting link safety check:', href);
       chrome.runtime.sendMessage(
         { action: 'checkLinkSafety', url: href },
         (response) => {
-          if (chrome.runtime.lastError || !response) return;
+          if (chrome.runtime.lastError || !response) {
+            console.warn('[Guardian AI Content] ⚠️ Link check failed:', chrome.runtime.lastError?.message);
+            return;
+          }
+
+          console.log('[Guardian AI Content] ✅ Link check complete:', response);
 
           // Cache result
           linkCache.set(href, response);
@@ -258,6 +291,64 @@
         }
       );
     }, 500);
+  }
+
+  /**
+   * Perform quick client-side link check for obvious threats
+   */
+  function performQuickLinkCheck(url) {
+    const urlLower = url.toLowerCase();
+
+    // Suspicious TLDs
+    const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.work', '.click', '.link'];
+    for (const tld of suspiciousTLDs) {
+      if (urlLower.includes(tld)) {
+        return {
+          suspicious: true,
+          risk: 75,
+          reason: `Suspicious domain extension (${tld}) - often used in scams`
+        };
+      }
+    }
+
+    // Urgency keywords in URL
+    const urgencyKeywords = ['urgent', 'verify', 'suspended', 'expires', 'confirm', 'update', 'security-alert'];
+    for (const keyword of urgencyKeywords) {
+      if (urlLower.includes(keyword)) {
+        return {
+          suspicious: true,
+          risk: 60,
+          reason: `Urgency trigger in URL ("${keyword}") - common phishing tactic`
+        };
+      }
+    }
+
+    // IP address instead of domain
+    const ipPattern = /https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/;
+    if (ipPattern.test(url)) {
+      return {
+        suspicious: true,
+        risk: 70,
+        reason: 'Link uses IP address instead of domain - suspicious'
+      };
+    }
+
+    // Excessive subdomains (potential typosquatting)
+    try {
+      const urlObj = new URL(url);
+      const parts = urlObj.hostname.split('.');
+      if (parts.length > 4) {
+        return {
+          suspicious: true,
+          risk: 55,
+          reason: 'Unusual number of subdomains - verify legitimacy'
+        };
+      }
+    } catch (e) {
+      // Invalid URL
+    }
+
+    return { suspicious: false };
   }
 
   /**

@@ -82,6 +82,13 @@ async function postFullScan(payload) {
 async function handleScoutSignal(signal, sender, sendResponse) {
   const tabId = sender.tab && sender.tab.id;
 
+  console.log('[Guardian AI Background] 🔍 Received Scout signal from tab', tabId, {
+    url: signal.url,
+    isLogin: signal.isLogin,
+    hasPrivacyPolicy: signal.hasPrivacyPolicy,
+    keywords: signal.detectedKeywords?.length || 0
+  });
+
   setBadgeScanning(tabId);
 
   try {
@@ -89,6 +96,11 @@ async function handleScoutSignal(signal, sender, sendResponse) {
       url: signal.url || '',
       scanType: 'page',
       content: ''
+    });
+
+    console.log('[Guardian AI Background] ✅ Full scan complete for tab', tabId, {
+      riskScore: result.riskScore,
+      threatType: result.threatType
     });
 
     if (tabId != null) {
@@ -107,7 +119,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
 
     sendResponse(result);
   } catch (err) {
-    console.error('[Guardian AI] Full scan failed:', err);
+    console.error('[Guardian AI Background] ❌ Full scan failed for tab', tabId, err);
     setBadgeFromResult({ riskScore: 0, hasPrivacyPolicy: signal.hasPrivacyPolicy }, tabId);
     if (tabId != null) {
       tabState.set(tabId, { hasPrivacyPolicy: signal.hasPrivacyPolicy, riskScore: 0, url: signal.url });

@@ -146,7 +146,7 @@ if (fullScanBtn) {
       const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
 
       // Open webapp with scan results
-      const WEBAPP_URL = 'http://localhost:3000'; // Update this to your webapp URL
+      const WEBAPP_URL = 'http://localhost:5173'; // Vite dev server
       const scanId = result.scanId || 'latest';
 
       // Open webapp in new tab with scan ID
@@ -273,7 +273,7 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
     });
 
     // Open webapp with scan results
-    const WEBAPP_URL = 'http://localhost:3000'; // Update this to your webapp URL
+    const WEBAPP_URL = 'http://localhost:5173'; // Vite dev server
     const scanId = result.scanId || 'latest';
 
     // Open webapp in new tab with scan ID
