@@ -26,11 +26,10 @@ OPENROUTER_MODEL = "google/gemini-2.0-flash-001"
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 MONGODB_DB = os.getenv("MONGODB_DB", "guardian_ai")
 
-# ElevenLabs disabled - no API key; uncomment when you have keys
-# ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-# ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
-# EDUCATOR_VOICE_ENABLED = os.getenv("EDUCATOR_VOICE_ENABLED", "true").lower() == "true"
-EDUCATOR_VOICE_ENABLED = False  # Voice disabled until ElevenLabs keys are set
+# ElevenLabs (optional)
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
+EDUCATOR_VOICE_ENABLED = os.getenv("EDUCATOR_VOICE_ENABLED", "false").lower() == "true"
 
 EDUCATOR_DEFAULT_LANG = os.getenv("EDUCATOR_DEFAULT_LANG", "en")
 
@@ -43,6 +42,7 @@ EDUCATOR_DEBUG = os.getenv("EDUCATOR_DEBUG", "false").lower() == "true"
 # =============================
 _mongo_client = None
 _learning_col = None
+_gridfs = None
 
 
 def _get_learning_collection():
@@ -77,6 +77,50 @@ def _get_learning_collection():
         return _learning_col
     except Exception:
         # Silent fail — logging is optional
+        return None
+
+
+def _get_gridfs():
+    """
+    MongoDB GridFS is OPTIONAL.
+    If MONGODB_URI is missing/empty, this returns None and Educator continues normally.
+    """
+    global _mongo_client, _gridfs
+
+    if not MONGODB_URI:
+        return None
+
+    if _gridfs is not None:
+        return _gridfs
+
+    # Import pymongo/gridfs only when needed
+    try:
+        from pymongo import MongoClient  # local import avoids dependency if unused
+        import gridfs
+    except Exception as e:
+        if EDUCATOR_DEBUG:
+            print("DEBUG GridFS import failed:", repr(e))
+        return None
+
+    try:
+        # Reuse existing mongo client if already created
+        if _mongo_client is None:
+            _mongo_client = MongoClient(
+                MONGODB_URI,
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000,
+            )
+
+        # Force a quick connection check so failures aren't silent
+        _mongo_client.admin.command("ping")
+
+        db = _mongo_client[MONGODB_DB]
+        _gridfs = gridfs.GridFS(db)
+        return _gridfs
+
+    except Exception as e:
+        if EDUCATOR_DEBUG:
+            print("DEBUG GridFS init failed:", repr(e))
         return None
 
 
@@ -247,29 +291,67 @@ def _log_learning(user_id: str, analyst: AnalystOutput, tags: List[str]) -> None
         return
 
 
-def _voice_alert(text: str) -> Optional[str]:
-    # ElevenLabs disabled - no API key; returns None so voiceAlert is always None
-    # Uncomment the block below and add ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID when you have keys
-    return None
-    # --- ElevenLabs code (commented out) ---
-    # if not EDUCATOR_VOICE_ENABLED:
-    #     return None
-    # if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
-    #     return None
-    # short = (text.split(".")[0] or text).strip()
-    # if len(short) > 240:
-    #     short = short[:240] + "…"
-    # url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    # headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"}
-    # payload = {"text": short, "model_id": "eleven_multilingual_v2"}
-    # try:
-    #     r = requests.post(url, headers=headers, json=payload, timeout=20)
-    #     if r.status_code != 200:
-    #         return None
-    #     import base64
-    #     return "audio/mpeg;base64," + base64.b64encode(r.content).decode("utf-8")
-    # except Exception:
-    #     return None
+def _voice_alert(text: str, analyst_output: AnalystOutput, lang: str) -> Optional[str]:
+    """
+    Generate an MP3 via ElevenLabs and store it in MongoDB GridFS.
+    Returns a GridFS file id (string) or None if disabled/unavailable.
+    """
+    if not EDUCATOR_VOICE_ENABLED:
+        return None
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+        return None
+
+    fs = _get_gridfs()
+    if fs is None:
+        return None
+
+    # Keep voice short + demo-friendly
+    short = (text.split("\n")[0] or text).strip()
+    if len(short) > 240:
+        short = short[:240] + "…"
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    payload = {"text": short, "model_id": "eleven_multilingual_v2"}
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        if r.status_code != 200 or not r.content:
+            if EDUCATOR_DEBUG:
+                print("DEBUG ElevenLabs failed:", r.status_code, (r.text or "")[:200])
+            return None
+
+        # Use Analyst's analysisId if present; else stable fallback id
+        analysis_id = getattr(analyst_output, "analysisId", None) or ""
+        if not analysis_id:
+            raw = f"{analyst_output.threatType}|{analyst_output.riskScore}|{(analyst_output.evidence or [])[:2]}"
+            analysis_id = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+        file_id = fs.put(
+            r.content,
+            filename=f"voice_{analysis_id}.mp3",
+            contentType="audio/mpeg",
+            metadata={
+                "analysisId": analysis_id,
+                "agent": "educator",
+                "type": "voice_alert",
+                "language": lang,
+                "threatType": analyst_output.threatType,
+                "riskScore": analyst_output.riskScore,
+                "confidence": analyst_output.confidence,
+                "createdAt": _now_iso(),
+            },
+        )
+        return str(file_id)
+
+    except Exception as ex:
+        if EDUCATOR_DEBUG:
+            print("DEBUG ElevenLabs/GridFS exception:", repr(ex))
+        return None
 
 
 # =============================
@@ -302,10 +384,9 @@ async def explain(
 
     _log_learning(user_id, analyst_output, tags)
 
-    # ElevenLabs disabled - voiceAlert is always None without API keys
     voice = None
-    # if analyst_output.riskScore >= 70:
-    #     voice = _voice_alert(explanation)
+    if analyst_output.riskScore >= 70:
+        voice = _voice_alert(explanation, analyst_output, lang)
 
     return EducatorOutput(
         explanation=explanation,
