@@ -53,4 +53,5 @@ class ScanResult(BaseModel):
     evidence: List[Dict]
     explanation: str
     nextSteps: List[str]
+    mitreAttackTechniques: Optional[List[str]] = None
 

@@ -1,6 +1,6 @@
 /**
  * Guardian AI Scout - Popup (Manual Tools)
- * Paste Analysis for any text (email, SMS, privacy paragraph).
+ * Full pipeline: Scout → Analyst → Educator → display (paste + current page).
  * Shows "Privacy Policy Found" when content script detected one on current tab.
  */
 
@@ -13,36 +13,18 @@ const pageResult = document.getElementById('page-result');
 const currentPageEl = document.getElementById('current-page');
 const statusMessage = document.getElementById('status-message');
 const privacyNotice = document.getElementById('privacy-notice');
+const fullScanBtn = document.getElementById('full-scan-btn');
 
-analyzeBtn.addEventListener('click', async () => {
-  const text = pasteInput.value.trim();
-
-  if (!text || text.length < 10) {
-    showStatus('Please paste at least 10 characters', 'error');
-    return;
-  }
-
-  analyzeBtn.disabled = true;
-  analyzeBtn.textContent = 'Analyzing...';
-  pasteResult.innerHTML = '<div class="loading"></div> Analyzing...';
-
-  try {
-    const result = await sendPasteToBackend(text);
-    displayResult(pasteResult, result);
-    showStatus('Analysis complete', 'success');
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, 'error');
-    pasteResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
-  } finally {
-    analyzeBtn.disabled = false;
-    analyzeBtn.textContent = 'Analyze';
-  }
-});
-
-/** Send pasted text via background so backend gets same SCOUT_SIGNAL-style payload */
-async function sendPasteToBackend(text) {
+/** Full pipeline: POST /scan (Scout → Analyst → Educator → DB → client) */
+async function fullScanToBackend(payload) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: 'pasteAnalysis', text }, (response) => {
+    chrome.runtime.sendMessage({
+      action: 'fullScan',
+      url: payload.url || '',
+      scanType: payload.scanType || 'message',
+      content: payload.content ?? null,
+      image_data: payload.image_data ?? null
+    }, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message || 'Extension error'));
         return;
@@ -51,16 +33,16 @@ async function sendPasteToBackend(text) {
         reject(new Error(response.error));
         return;
       }
-      resolve(response || { riskScore: 0 });
+      resolve(response || {});
     });
   });
 }
 
-function displayResult(container, result) {
+/** Display full ScanResult (explanation, nextSteps, evidence, mitreAttackTechniques) */
+function displayFullResult(container, result) {
   const risk = result.riskScore != null ? result.riskScore : 0;
   let riskColor = 'green';
   let riskEmoji = '✅';
-
   if (risk > 70) {
     riskColor = 'red';
     riskEmoji = '🚨';
@@ -68,7 +50,45 @@ function displayResult(container, result) {
     riskColor = 'yellow';
     riskEmoji = '⚠️';
   }
+  const explanation = result.explanation || '';
+  const nextSteps = result.nextSteps || [];
+  const evidence = result.evidence || [];
+  const mitre = result.mitreAttackTechniques || [];
+  const threatType = result.threatType || 'unknown';
 
+  container.innerHTML = `
+    <div class="result-content full-result">
+      <div class="risk-score ${riskColor}">
+        <span class="emoji">${riskEmoji}</span>
+        <span class="score">${risk}/100</span>
+      </div>
+      <div class="risk-label">Risk Score · ${threatType}</div>
+      ${explanation ? `<div class="explanation">${escapeHtml(explanation)}</div>` : ''}
+      ${nextSteps.length ? `<div class="next-steps"><strong>Next steps:</strong><ul>${nextSteps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul></div>` : ''}
+      ${evidence.length ? `<div class="evidence"><strong>Evidence:</strong><ul>${evidence.slice(0, 5).map(e => `<li>${escapeHtml(e.finding || JSON.stringify(e))}</li>`).join('')}</ul></div>` : ''}
+      ${mitre.length ? `<div class="mitre">MITRE: ${escapeHtml(mitre.join(', '))}</div>` : ''}
+    </div>
+  `;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/** Simple risk-only display (used for quick /api/scout/scan on page load) */
+function displayResult(container, result) {
+  const risk = result.riskScore != null ? result.riskScore : 0;
+  let riskColor = 'green';
+  let riskEmoji = '✅';
+  if (risk > 70) {
+    riskColor = 'red';
+    riskEmoji = '🚨';
+  } else if (risk >= 40) {
+    riskColor = 'yellow';
+    riskEmoji = '⚠️';
+  }
   container.innerHTML = `
     <div class="result-content">
       <div class="risk-score ${riskColor}">
@@ -85,6 +105,51 @@ function displayResult(container, result) {
   `;
 }
 
+analyzeBtn.addEventListener('click', async () => {
+  const text = pasteInput.value.trim();
+  if (!text || text.length < 10) {
+    showStatus('Please paste at least 10 characters', 'error');
+    return;
+  }
+  analyzeBtn.disabled = true;
+  analyzeBtn.textContent = 'Analyzing...';
+  pasteResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+
+  try {
+    const result = await fullScanToBackend({ url: '', scanType: 'message', content: text });
+    displayFullResult(pasteResult, result);
+    showStatus('Analysis complete (saved to DB)', 'success');
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+    pasteResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+  } finally {
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = 'Analyze';
+  }
+});
+
+if (fullScanBtn) {
+  fullScanBtn.addEventListener('click', async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.url || !tab.url.startsWith('http')) {
+        showStatus('No valid page to analyze', 'error');
+        return;
+      }
+      fullScanBtn.disabled = true;
+      pageResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+      const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
+      displayFullResult(pageResult, result);
+      showStatus('Full analysis complete (saved to DB)', 'success');
+    } catch (error) {
+      showStatus(`Error: ${error.message}`, 'error');
+      pageResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+    } finally {
+      fullScanBtn.disabled = false;
+    }
+  });
+}
+
 function showStatus(message, type = 'info') {
   statusMessage.textContent = message;
   statusMessage.className = `status-message ${type}`;
@@ -97,13 +162,14 @@ function showStatus(message, type = 'info') {
   }
 }
 
-/** Load current tab status and show Privacy Policy Found if content script detected one */
+/** On popup open: run full pipeline (Scout → Analyst → Educator) for current tab and show full result. No button click. */
 async function loadCurrentPageStatus() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) {
       currentPageEl.textContent = 'No active tab';
       privacyNotice.style.display = 'none';
+      pageResult.innerHTML = '';
       return;
     }
 
@@ -123,28 +189,19 @@ async function loadCurrentPageStatus() {
     }
 
     if (tab.url && tab.url.startsWith('http')) {
-      const response = await fetch(`${BACKEND_URL}/api/scout/scan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: tab.url,
-          isLogin: false,
-          hasPrivacyPolicy: tabState ? !!tabState.hasPrivacyPolicy : false,
-          detectedKeywords: []
-        })
-      });
-      if (response.ok) {
-        const result = await response.json();
-        displayResult(pageResult, result);
+      pageResult.innerHTML = '<div class="loading"></div> Running full scan (Scout → Analyst → Educator)...';
+      const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
+      if (result.error) {
+        pageResult.innerHTML = `<div class="error">❌ ${result.error}</div>`;
       } else {
-        pageResult.innerHTML = '<div class="error">Backend unavailable</div>';
+        displayFullResult(pageResult, result);
       }
     } else {
       pageResult.innerHTML = '';
     }
-  } catch (_) {
+  } catch (err) {
     currentPageEl.textContent = 'Unable to analyze current page';
-    pageResult.innerHTML = '<div class="error">Backend unavailable</div>';
+    pageResult.innerHTML = `<div class="error">❌ ${err.message || 'Backend unavailable'}</div>`;
     privacyNotice.style.display = 'none';
   }
 }

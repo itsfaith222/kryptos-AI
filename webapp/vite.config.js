@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/scan': 'http://localhost:8000',
+      '/api': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
     },
   },

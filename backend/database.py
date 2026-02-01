@@ -31,11 +31,13 @@ def _get_db():
 
 
 async def save_scan(scan_result: dict) -> None:
-    """Save scan result to MongoDB."""
+    """Save full ScanResult to MongoDB (scanId, riskScore, threatType, evidence, explanation, nextSteps, mitreAttackTechniques, etc.)."""
     db = _get_db()
-    result = db[COLLECTION].insert_one(scan_result)
+    # Insert a copy so PyMongo adding _id does not mutate the caller's dict (avoids ObjectId in API response).
+    doc = dict(scan_result)
+    result = db[COLLECTION].insert_one(doc)
     # Terminal feedback
-    print(f"\n[DB] Scan saved to MongoDB | scanId={scan_result.get('scanId', '?')[:8]}... | riskScore={scan_result.get('riskScore')} | threatType={scan_result.get('threatType')}\n")
+    print(f"\n[DB] Scan saved to MongoDB | scanId={doc.get('scanId', '?')[:8]}... | riskScore={doc.get('riskScore')} | threatType={doc.get('threatType')}\n")
 
 
 async def get_recent_scans(limit: int = 10) -> list:

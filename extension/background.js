@@ -43,7 +43,7 @@ function setBadgeScanning(tabId) {
 }
 
 /**
- * POST SCOUT_SIGNAL payload to backend
+ * POST SCOUT_SIGNAL payload to backend (quick Scout-only; badge / lightweight risk).
  */
 async function postScoutScan(payload) {
   const res = await fetch(`${BACKEND_URL}/api/scout/scan`, {
@@ -58,31 +58,45 @@ async function postScoutScan(payload) {
 }
 
 /**
- * Handle SCOUT_SIGNAL from content script
+ * Full pipeline: POST /scan (Scout → Analyst → Educator → DB → client).
+ * Payload: { url, scanType, content?, image_data? } per ScanInput.
+ */
+async function postFullScan(payload) {
+  const res = await fetch(`${BACKEND_URL}/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data.error || data.message || `Backend error: ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/**
+ * Handle SCOUT_SIGNAL from content script — full pipeline (Scout → Analyst → Educator) per guide.
+ * Everything scanned by Scout goes automatically to Analyzer; no extra button.
  */
 async function handleScoutSignal(signal, sender, sendResponse) {
   const tabId = sender.tab && sender.tab.id;
 
   setBadgeScanning(tabId);
 
-  const payload = {
-    url: signal.url,
-    isLogin: signal.isLogin,
-    hasPrivacyPolicy: signal.hasPrivacyPolicy,
-    detectedKeywords: signal.detectedKeywords || [],
-    detectedScam: signal.detectedScam || [],
-    detectedMalware: signal.detectedMalware || []
-  };
-
   try {
-    const result = await postScoutScan(payload);
+    const result = await postFullScan({
+      url: signal.url || '',
+      scanType: 'page',
+      content: ''
+    });
 
-    // Store tab state for popup (e.g. "Privacy Policy Found")
     if (tabId != null) {
       tabState.set(tabId, {
         hasPrivacyPolicy: signal.hasPrivacyPolicy,
         riskScore: result.riskScore,
-        url: signal.url
+        url: signal.url,
+        fullResult: result
       });
     }
 
@@ -93,7 +107,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
 
     sendResponse(result);
   } catch (err) {
-    console.error('[Guardian AI] Scout scan failed:', err);
+    console.error('[Guardian AI] Full scan failed:', err);
     setBadgeFromResult({ riskScore: 0, hasPrivacyPolicy: signal.hasPrivacyPolicy }, tabId);
     if (tabId != null) {
       tabState.set(tabId, { hasPrivacyPolicy: signal.hasPrivacyPolicy, riskScore: 0, url: signal.url });
@@ -117,7 +131,8 @@ const MALWARE_KEYWORDS = [
 ];
 
 /**
- * Handle paste / manual text analysis (any text: email, SMS, privacy paragraph)
+ * Handle paste / manual text analysis — quick Scout-only (no Analyst/Educator).
+ * Popup now uses fullScan for "Analyze" so full pipeline runs; this is legacy/optional.
  */
 async function handleAnalyzeText(text, sendResponse) {
   try {
@@ -167,6 +182,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse(tabId != null ? (tabState.get(tabId) || null) : null);
     return false;
   }
+  if (request.action === 'fullScan') {
+    postFullScan({
+      url: request.url || '',
+      scanType: request.scanType || 'message',
+      content: request.content || null,
+      image_data: request.image_data || null
+    }).then(sendResponse).catch((err) => {
+      console.error('[Guardian AI] Full scan failed:', err);
+      sendResponse({ error: err.message });
+    });
+    return true;
+  }
+  return false;
 });
 
 // Default badge on load: Scanning

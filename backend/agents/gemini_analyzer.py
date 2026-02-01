@@ -29,9 +29,9 @@ class GeminiAnalyzer:
 
     # ──────────────────────────────────────────────────────────────────
     def analyze_threat(self, content: str, url: str = "") -> Dict:
-        """Send to Gemini 2.0 Flash via OpenRouter REST endpoint"""
+        """Send to Gemini 2.0 Flash via OpenRouter REST endpoint. No fallback — raise if not configured or API fails."""
         if not self.available:
-            return self._fallback_analysis(content)
+            raise ValueError("Analyst: OpenRouter not configured — set OPENROUTER_API_KEY in .env")
 
         prompt = f"""You are a cybersecurity analyst. Analyze this for threats:
 
@@ -104,27 +104,4 @@ Return ONLY valid JSON:
                     clean = clean[4:]
             return json.loads(clean.strip())
 
-    # ──────────────────────────────────────────────────────────────────
-    def _fallback_analysis(self, content: str) -> Dict:
-        """Local keyword-scan fallback when OpenRouter is unreachable"""
-        lower = content.lower()
-        tactics = []
-        risk = 35
-
-        if any(w in lower for w in ["urgent", "immediately", "24 hours", "asap"]):
-            tactics.append({"type": "urgency", "example": "urgency keyword detected", "severity": "high"})
-            risk += 15
-        if any(w in lower for w in ["password", "login", "verify", "sign in"]):
-            tactics.append({"type": "credential_request", "example": "credential keyword detected", "severity": "critical"})
-            risk += 20
-        if any(w in lower for w in ["suspended", "locked", "unauthorized"]):
-            tactics.append({"type": "fear", "example": "fear keyword detected", "severity": "high"})
-            risk += 10
-
-        return {
-            "threatType": "unknown",
-            "riskScore": min(risk, 100),
-            "confidence": 0.4,
-            "manipulationTactics": tactics,
-            "explanation": "OpenRouter/Gemini unavailable — local keyword fallback used.",
-        }
+    # No _fallback_analysis — we raise so you know where to fix (OpenRouter config or API)

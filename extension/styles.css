@@ -170,6 +170,15 @@ body {
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
+.btn-secondary {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.btn-secondary:hover {
+  background: #d1d5db;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -259,6 +268,30 @@ body {
   font-size: 13px;
   color: #6b7280;
   margin: 4px 0 0 0;
+}
+
+/* Full pipeline result (explanation, nextSteps, evidence, MITRE) */
+.full-result .explanation {
+  font-size: 12px;
+  color: #374151;
+  margin-top: 10px;
+  line-height: 1.4;
+}
+.full-result .next-steps,
+.full-result .evidence {
+  font-size: 12px;
+  color: #4b5563;
+  margin-top: 8px;
+}
+.full-result .next-steps ul,
+.full-result .evidence ul {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+}
+.full-result .mitre {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 6px;
 }
 
 /* Recommendation box */

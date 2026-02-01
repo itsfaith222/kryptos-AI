@@ -15,14 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from contracts import ScanInput, ScoutOutput
 
-# Initialize Gemini (if available)
-try:
-    import google.generativeai as genai
-    genai.configure(api_key=os.getenv('GEMINI_API_KEY', ''))
-    GEMINI_AVAILABLE = True
-except Exception as e:
-    print(f"Warning: Gemini API not configured: {e}")
-    GEMINI_AVAILABLE = False
+# OpenRouter only (same key as Analyst/Educator) — used for image analysis
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "google/gemini-2.0-flash-001"
 
 
 class ScoutAgent:
@@ -68,6 +64,10 @@ class ScoutAgent:
         
         # Get predictive warning (mock for now)
         predictive_warning = await self.get_predictive_warnings({})
+        
+        # Pass url/content in signals so Analyst can use them (integration contract)
+        signals["_url"] = input_data.url or ""
+        signals["_content"] = input_data.content or ""
         
         return ScoutOutput(
             scanType=input_data.scanType,
@@ -136,14 +136,11 @@ class ScoutAgent:
     
     async def analyze_image(self, image_data: str) -> Dict:
         """
-        Analyze screenshot using Gemini Vision API
-        
-        Args:
-            image_data: Base64 encoded image data
-            
-        Returns:
-            Signals dict with detected visual elements
+        Analyze screenshot using OpenRouter (vision-capable model). No fallback — raise if not configured or API fails.
         """
+        import base64
+        import requests as req
+
         signals = {
             "hasLogo": False,
             "logoQuality": "high",
@@ -152,62 +149,49 @@ class ScoutAgent:
             "suspiciousPatterns": [],
             "source": "image"
         }
-        
-        if not image_data or not GEMINI_AVAILABLE:
+
+        if not image_data:
             return signals
-        
+
+        if not OPENROUTER_API_KEY:
+            raise ValueError("Scout image: OpenRouter not configured — set OPENROUTER_API_KEY in .env")
+
+        prompt = """Analyze this image for potential scams or phishing attempts.
+Look for: company logos (legitimate or fake), urgency language, requests for personal info, suspicious URLs/phone numbers, poor quality or spelling errors.
+Extract any visible text. Respond with JSON only:
+{"hasLogo": true/false, "logoQuality": "high/medium/low", "suspiciousElements": [], "extractedText": "up to 500 chars", "overallAssessment": "legitimate/suspicious/scam"}"""
+
+        # OpenRouter vision: image in content as image_url (data URL)
+        url = f"data:image/png;base64,{image_data}" if "base64," not in image_data[:20] else image_data
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+
         try:
-            import base64
-            
-            # Initialize Gemini Vision model
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # Decode base64
-            image_bytes = base64.b64decode(image_data)
-            
-            # Create prompt for scam detection
-            prompt = """
-            Analyze this image for potential scams or phishing attempts.
-            
-            Look for:
-            1. Company logos (check if they look legitimate or fake)
-            2. Urgency language or threats
-            3. Requests for personal information (SSN, credit card, etc)
-            4. Suspicious URLs or phone numbers
-            5. Poor quality graphics, spelling errors, or misaligned elements
-            
-            Extract any visible text from the image.
-            
-            Respond with JSON:
-            {
-              "hasLogo": true/false,
-              "logoQuality": "high/medium/low",
-              "suspiciousElements": ["list", "of", "red", "flags"],
-              "extractedText": "up to 500 chars of text from image",
-              "overallAssessment": "legitimate/suspicious/scam"
-            }
-            """
-            
-            # Generate analysis
-            response = model.generate_content(
-                [prompt, {"mime_type": "image/png", "data": image_bytes}]
+            resp = req.post(
+                OPENROUTER_URL,
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                json={"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": content}]},
+                timeout=45,
             )
-            
-            # Parse response
-            result = json.loads(response.text)
-            
+            resp.raise_for_status()
+            raw = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not raw:
+                raise RuntimeError("Scout image: not generating — OpenRouter returned empty")
+            result = json.loads(raw.strip())
             signals["hasLogo"] = result.get("hasLogo", False)
             signals["logoQuality"] = result.get("logoQuality", "high")
             signals["suspiciousImages"] = result.get("overallAssessment") != "legitimate"
-            signals["extractedText"] = result.get("extractedText", "")[:500]
+            signals["extractedText"] = (result.get("extractedText") or "")[:500]
             signals["suspiciousPatterns"] = result.get("suspiciousElements", [])
-            
-        except Exception as e:
-            print(f"Error analyzing image with Gemini: {e}")
-            # Return conservative signals on error
-            signals["suspiciousImages"] = True
-            signals["logoQuality"] = "low"
-        
+        except req.exceptions.RequestException as e:
+            print(f"Scout image: OpenRouter request failed: {e}")
+            raise RuntimeError("Scout image: not generating — OpenRouter request failed") from e
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Scout image: parse error: {e}")
+            raise RuntimeError("Scout image: not generating — invalid response format") from e
+
         return signals
     
     async def extract_page_signals(self, url: str) -> Dict:
@@ -423,6 +407,12 @@ def compute_risk_from_signal(
 
 # Create singleton instance
 scout = ScoutAgent()
+
+
+# ============= ORCHESTRATOR API (main.py calls this) =============
+async def analyze(input_data: ScanInput) -> ScoutOutput:
+    """Entry point for orchestrator: Scout analyzes input and returns ScoutOutput."""
+    return await scout.analyze(input_data)
 
 
 # ============= ASYNC WRAPPER FOR TESTING =============

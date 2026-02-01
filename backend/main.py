@@ -46,7 +46,15 @@ app.add_middleware(
 )
 
 
-# --- Mock agent outputs (used until Person A/B/C implement real agents) ---
+# --- Fallback mocks when agents fail to import; remove later if we want to fail instead ---
+# def _is_high_risk(input_data: ScanInput) -> bool:
+#     content = (input_data.content or "").lower()
+#     return "urgent" in content or "verify" in content
+#
+# def _mock_scout(...): ...
+# def _mock_analyst(...): ...
+# def _mock_educator(...): ...
+# (Kept below for fallback in _run_scout/_run_analyst/_run_educator on ImportError/AttributeError)
 
 def _is_high_risk(input_data: ScanInput) -> bool:
     content = (input_data.content or "").lower()
@@ -130,6 +138,7 @@ def _assemble_scan_result(
     analyst_result: AnalystOutput,
     educator_result: EducatorOutput,
 ) -> ScanResult:
+    """Assemble full ScanResult (Scout → Analyst → Educator) for client and DB."""
     return ScanResult(
         scanId=str(uuid4()),
         timestamp=datetime.utcnow().isoformat(),
@@ -141,7 +150,7 @@ def _assemble_scan_result(
         evidence=analyst_result.evidence,
         explanation=educator_result.explanation,
         nextSteps=educator_result.nextSteps,
-        mitreAttackTechniques=analyst_result.mitreAttackTechniques,
+        mitreAttackTechniques=analyst_result.mitreAttackTechniques or [],
     )
 
 
@@ -201,23 +210,22 @@ async def api_scout_scan(request: dict):
 
 @app.post("/scan")
 async def scan_endpoint(input_data: ScanInput):
-    """Full pipeline: Scout → Analyst → Educator → ScanResult. Uses mocks until agents exist."""
-    scout_result = await _run_scout(input_data)
-
-    if scout_result.recommendation == "SAFE":
-        analyst_result = _mock_analyst(scout_result)
-        educator_result = _mock_educator(analyst_result)
-    else:
+    """Full pipeline: Scout → Analyst → Educator → ScanResult → DB → client (extension/dashboard)."""
+    try:
+        scout_result = await _run_scout(input_data)
         analyst_result = await _run_analyst(scout_result)
         educator_result = await _run_educator(analyst_result)
-
-    result = _assemble_scan_result(input_data, analyst_result, educator_result)
-
-    try:
-        from database import save_scan
-        await save_scan(result.model_dump())
-    except Exception as e:
-        logger.exception("Could not save scan to database")
-        print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
-
-    return result.model_dump()
+        result = _assemble_scan_result(input_data, analyst_result, educator_result)
+        result_dict = result.model_dump()
+        try:
+            from database import save_scan
+            await save_scan(result_dict)
+        except Exception as e:
+            logger.exception("Could not save scan to database")
+            print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
+        return result_dict
+    except (ValueError, RuntimeError) as e:
+        msg = str(e)
+        logger.warning("Scan pipeline error: %s", msg)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={"error": msg})

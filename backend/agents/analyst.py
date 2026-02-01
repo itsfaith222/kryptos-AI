@@ -20,6 +20,11 @@ except (ImportError, ValueError):
     from mitre_mapper import MITREMapper
     from whois_checker import WHOISChecker
 
+try:
+    from ..contracts import ScoutOutput, AnalystOutput
+except ImportError:
+    from contracts import ScoutOutput, AnalystOutput
+
 
 class AnalystAgent:
     """The Analyst Agent - Guardian AI's Deep Investigator"""
@@ -104,30 +109,76 @@ class AnalystAgent:
 
 
 # ==========================================
-# STANDALONE TESTING
+# ORCHESTRATOR API (main.py calls this)
 # ==========================================
-async def test_hour_4_6():
-    print("=" * 60)
-    print("🧪 TESTING HOUR 4-6: MITRE + WHOIS + OPENROUTER")
-    print("=" * 60)
-
+async def investigate(scout_result: ScoutOutput) -> AnalystOutput:
+    """
+    Entry point for orchestrator: Analyst investigates ScoutOutput and returns AnalystOutput.
+    Converts ScoutOutput -> scout_data dict for analyze_threat, then result dict -> AnalystOutput.
+    """
     scout_data = {
-        "url": "https://paypa1-verify.com/login",
-        "content": "URGENT: Verify your account within 24 hours or it will be suspended!",
-        "signals": {"hasPassword": True, "sslValid": False},
+        "url": scout_result.signals.get("_url", ""),
+        "content": scout_result.signals.get("_content", ""),
+        "signals": scout_result.signals,
     }
+    agent = AnalystAgent(db=None)
+    result = await agent.analyze_threat(scout_data)
 
-    analyst = AnalystAgent(db=None)
-    result = await analyst.analyze_threat(scout_data)
+    # Build evidence list for AnalystOutput (contract)
+    evidence: List[Dict] = []
+    whois_data = result.get("whoisData") or {}
+    if whois_data:
+        age = whois_data.get("domainAgeDays", -1)
+        finding = f"Domain: {whois_data.get('domainName', '')} (age: {age} days)"
+        evidence.append({
+            "type": "domain",
+            "finding": finding,
+            "weight": 0.8,
+            "severity": "high" if whois_data.get("suspicionScore", 0) > 50 else "medium",
+        })
+    for tactic in result.get("manipulationTactics", []):
+        evidence.append({
+            "type": "tactic",
+            "finding": tactic.get("example", tactic.get("type", "manipulation")),
+            "weight": 0.7,
+            "severity": tactic.get("severity", "medium"),
+        })
 
-    print("📊 RESULTS")
-    print(f"Risk: {result['riskScore']}/100")
-    print(f"Threat: {result['threatType']}")
-    print(f"MITRE Techs: {[t['name'] for t in result['mitreAttackTechniques']]}")
-    print(f"Tactics: {[t['type'] for t in result['manipulationTactics']]}")
-    print("=" * 60)
+    # MITRE: analyst returns list of dicts {id, name, ...}; contract wants List[str]
+    mitre_list = result.get("mitreAttackTechniques", [])
+    mitre_ids = [t.get("id", t) if isinstance(t, dict) else str(t) for t in mitre_list]
+
+    return AnalystOutput(
+        analysisId=result.get("analysisId", str(uuid.uuid4())),
+        threatType=result.get("threatType", "unknown"),
+        riskScore=result.get("riskScore", 0),
+        confidence=result.get("confidence", 0.5),
+        evidence=evidence,
+        mitreAttackTechniques=mitre_ids,
+    )
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_hour_4_6())
+# ==========================================
+# STANDALONE TESTING (commented out — Analyst uses real Scout data via investigate() from main.py)
+# ==========================================
+# async def test_hour_4_6():
+#     print("=" * 60)
+#     print("🧪 TESTING HOUR 4-6: MITRE + WHOIS + OPENROUTER")
+#     print("=" * 60)
+#     scout_data = {
+#         "url": "https://paypa1-verify.com/login",
+#         "content": "URGENT: Verify your account within 24 hours or it will be suspended!",
+#         "signals": {"hasPassword": True, "sslValid": False},
+#     }
+#     analyst = AnalystAgent(db=None)
+#     result = await analyst.analyze_threat(scout_data)
+#     print("📊 RESULTS")
+#     print(f"Risk: {result['riskScore']}/100")
+#     print(f"Threat: {result['threatType']}")
+#     print(f"MITRE Techs: {[t['name'] for t in result['mitreAttackTechniques']]}")
+#     print(f"Tactics: {[t['type'] for t in result['manipulationTactics']]}")
+#     print("=" * 60)
+#
+# if __name__ == "__main__":
+#     import asyncio
+#     asyncio.run(test_hour_4_6())

@@ -4,22 +4,21 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
-# import requests  # ElevenLabs disabled - only used for voice
+import requests
 from dotenv import load_dotenv
 
 # Load .env for local runs (safe in prod too; it won't override real env vars)
 load_dotenv()
 
-# New Gemini SDK (non-deprecated)
-from google import genai
-
 from contracts import AnalystOutput, EducatorOutput
 
 
 # =============================
-# Config
+# Config — OpenRouter only (no GEMINI_API_KEY)
 # =============================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "google/gemini-2.0-flash-001"
 
 # Mongo is OPTIONAL — educator must work without it
 MONGODB_URI = os.getenv("MONGODB_URI", "")
@@ -42,10 +41,6 @@ EDUCATOR_DEBUG = os.getenv("EDUCATOR_DEBUG", "false").lower() == "true"
 # =============================
 _mongo_client = None
 _learning_col = None
-
-_gemini_client = None
-if GEMINI_API_KEY:
-    _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def _get_learning_collection():
@@ -128,18 +123,10 @@ def _bucket_privacy_evidence(evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"what": what, "who": who, "can_delete": can_delete}
 
 
-def _gemini_explanation(analyst: AnalystOutput, privacy: Dict[str, Any], lang: str) -> str:
-    # Fallback explanation for demo stability + when Gemini is down/rate-limited
-    fallback = (
-        f"🚨 High-risk security issue detected ({analyst.threatType}). "
-        f"Risk score {analyst.riskScore}/100. "
-        f"This item shows indicators of unsafe behavior. Do not proceed until verified."
-    )
-
-    if not _gemini_client:
-        if EDUCATOR_DEBUG:
-            print("DEBUG Gemini: no client (missing GEMINI_API_KEY)")
-        return fallback
+def _openrouter_explanation(analyst: AnalystOutput, privacy: Dict[str, Any], lang: str) -> str:
+    """Call OpenRouter (same key as Analyst) for plain-English explanation. No fallback — raise if not generating."""
+    if not OPENROUTER_API_KEY:
+        raise ValueError("Educator: OpenRouter not configured — set OPENROUTER_API_KEY in .env")
 
     evidence_lines = "\n".join(
         f"- {e.get('finding','')}" for e in (analyst.evidence or [])[:8] if e.get("finding")
@@ -172,25 +159,30 @@ DELETE: {privacy['can_delete']}
 """.strip()
 
     try:
-        resp = _gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
+        resp = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
         )
-        txt = (getattr(resp, "text", "") or "").strip()
+        resp.raise_for_status()
+        raw = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        txt = (raw or "").strip()
+        if not txt:
+            raise RuntimeError("Educator: not generating — OpenRouter returned empty explanation")
         if EDUCATOR_DEBUG:
-            print("DEBUG Gemini: generated =", bool(txt))
-        return txt if txt else fallback
-
-    except Exception as ex:
-        # handle quota/rate-limit errors gracefully (no crash)
+            print("DEBUG OpenRouter Educator: generated =", bool(txt))
+        return txt
+    except requests.exceptions.RequestException as e:
         if EDUCATOR_DEBUG:
-            print("DEBUG Gemini exception:", repr(ex))
-
-        msg = repr(ex)
-        if ("RESOURCE_EXHAUSTED" in msg) or ("429" in msg) or ("Quota exceeded" in msg):
-            return fallback
-
-        return fallback
+            print("DEBUG OpenRouter Educator exception:", repr(e))
+        raise RuntimeError("Educator: not generating — OpenRouter request failed") from e
 
 
 def _next_steps(threat_type: str, privacy: Dict[str, Any]) -> List[str]:
@@ -293,7 +285,7 @@ async def explain(
         print("DEBUG: Mongo enabled =", bool(MONGODB_URI))
 
     privacy = _bucket_privacy_evidence(analyst_output.evidence)
-    explanation = _gemini_explanation(analyst_output, privacy, lang)
+    explanation = _openrouter_explanation(analyst_output, privacy, lang)
 
     next_steps = _next_steps(analyst_output.threatType, privacy)
     learning_points = _learning_points(analyst_output.threatType, privacy)
