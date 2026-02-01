@@ -42,6 +42,7 @@ EDUCATOR_DEBUG = os.getenv("EDUCATOR_DEBUG", "false").lower() == "true"
 # =============================
 _mongo_client = None
 _learning_col = None
+_gridfs = None
 
 
 def _get_learning_collection():
@@ -76,6 +77,50 @@ def _get_learning_collection():
         return _learning_col
     except Exception:
         # Silent fail — logging is optional
+        return None
+
+
+def _get_gridfs():
+    """
+    MongoDB GridFS is OPTIONAL.
+    If MONGODB_URI is missing/empty, this returns None and Educator continues normally.
+    """
+    global _mongo_client, _gridfs
+
+    if not MONGODB_URI:
+        return None
+
+    if _gridfs is not None:
+        return _gridfs
+
+    # Import pymongo/gridfs only when needed
+    try:
+        from pymongo import MongoClient  # local import avoids dependency if unused
+        import gridfs
+    except Exception as e:
+        if EDUCATOR_DEBUG:
+            print("DEBUG GridFS import failed:", repr(e))
+        return None
+
+    try:
+        # Reuse existing mongo client if already created
+        if _mongo_client is None:
+            _mongo_client = MongoClient(
+                MONGODB_URI,
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000,
+            )
+
+        # Force a quick connection check so failures aren't silent
+        _mongo_client.admin.command("ping")
+
+        db = _mongo_client[MONGODB_DB]
+        _gridfs = gridfs.GridFS(db)
+        return _gridfs
+
+    except Exception as e:
+        if EDUCATOR_DEBUG:
+            print("DEBUG GridFS init failed:", repr(e))
         return None
 
 
@@ -310,7 +355,7 @@ async def explain(
 
     voice = None
     if analyst_output.riskScore >= 70:
-        voice = _voice_alert(explanation, metadata={"riskScore": analyst_output.riskScore, "threatType": analyst_output.threatType})
+        voice = _voice_alert(explanation, analyst_output, lang)
 
     return EducatorOutput(
         explanation=explanation,

@@ -1,65 +1,28 @@
 import asyncio
-import json
-from agents.educator import EducatorAgent
+from agents.educator import explain
 from contracts import AnalystOutput
 
-
-def _to_dict(obj):
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    return obj
-
-
-def pretty_print(out):
-    d = _to_dict(out)
-
-    border = "=" * 30
-    print("\n" + border)
-    print(" Guardian AI • Educator Output ")
-    print(border + "\n")
-
-    print("🧠 Explanation\n" + "-" * 28)
-    print(d["explanation"].strip(), "\n")
-
-    print("✅ Next Steps\n" + "-" * 28)
-    for i, s in enumerate(d["nextSteps"], 1):
-        print(f"{i}. {s.strip()}")
-    print()
-
-    print("📌 Learning Points\n" + "-" * 28)
-    for i, s in enumerate(d["learningPoints"], 1):
-        print(f"{i}. {s.strip()}")
-    print()
-
-    print("🔊 Voice Alert\n" + "-" * 28)
-    print(d["voiceAlert"] if d["voiceAlert"] else "(disabled)")
-    print()
-
-    print("🧾 Raw JSON\n" + "-" * 28)
-    print(json.dumps(d, indent=2, ensure_ascii=False))
-    print()
-
+from contracts import AnalystOutput
 
 async def main():
-    agent = EducatorAgent()
-    mock = AnalystOutput(
+    # Make sure riskScore >= 70 so voice triggers
+    analyst = AnalystOutput(
         analysisId="test123",
-        threatType="privacy_violation",
-        riskScore=87,
-        confidence=0.92,
+        threatType="phishing",
+        riskScore=92,
+        confidence=0.93,
         evidence=[
-            {"type": "privacy", "finding": "Collects your exact location 24/7", "severity": "high"},
-            {"type": "sharing", "finding": "Shares data with advertisers", "severity": "high"},
-            {"type": "retention", "finding": "No deletion option; data retained indefinitely", "severity": "high"},
+            {"type": "domain", "finding": "Domain created 2 days ago", "weight": 0.8, "severity": "high"},
+            {"type": "content", "finding": "Urgent language asking to verify account immediately", "weight": 0.6, "severity": "medium"},
         ],
-        mitreAttackTechniques=[],
+        mitreAttackTechniques=["T1566.002"]
     )
 
-    out = await agent.explain(mock)
-    pretty_print(out)
+    out = await explain(analyst, user_id="nada", lang="en")
+    print("\n=== EducatorOutput ===")
+    print("explanation:", out.explanation)
+    print("nextSteps:", out.nextSteps)
+    print("learningPoints:", out.learningPoints)
+    print("voiceAlert:", out.voiceAlert)
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
