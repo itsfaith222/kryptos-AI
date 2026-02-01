@@ -338,24 +338,32 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
             if trending_threats:
                 # Pick the most frequent threat
                 top_threat = trending_threats[0]
-                threat_type = top_threat.get("threat_type", "scam")
+                threat_type = top_threat.get("threat_type", "unknown")
                 count = top_threat.get("count", 0)
                 avg_risk = int(top_threat.get("avgRiskScore", 0))
                 
-                # Generate contextual warning with real-time data
-                return f"⚠️ Warning: {count} similar {threat_type} scam(s) detected in the last hour (avg risk: {avg_risk}/100)"
+                # Generate warning message based on threat type
+                threat_messages = {
+                    "phishing": f"⚠️ {count} phishing attempts detected in the last hour (avg risk: {avg_risk}/100)",
+                    "scam": f"⚠️ {count} scam attempts detected in the last hour (avg risk: {avg_risk}/100)",
+                    "malware": f"⚠️ {count} malware threats detected in the last hour (avg risk: {avg_risk}/100)",
+                    "privacy_violation": f"ℹ️ {count} privacy concerns flagged in the last hour (avg risk: {avg_risk}/100)",
+                }
+                
+                warning = threat_messages.get(threat_type, f"⚠️ {count} threats detected in the last hour")
+                
+                # Only show warning if significant (count >= 3 or avg_risk > 60)
+                if count >= 3 or avg_risk > 60:
+                    return warning
+                
+                return None
             
             # Fallback to mock warnings if MongoDB unavailable or no threats found
             import random
-            mock_threats = [
-                "Fake Netflix billing scams trending this week",
-                "Amazon package delivery scams up 150%",
-                "Tax refund phishing campaigns detected",
-                "Tech support scams targeting your OS",
-                "Fake PayPal invoice scams spreading"
-            ]
-            
-            return random.choice(mock_threats) if random.random() > 0.5 else None
+            if random.random() > 0.8:  # 20% chance of random tip if no real data
+                return "ℹ️ Tip: Enable 2FA on your accounts for better security"
+                
+            return None
             
         except Exception as e:
             # Graceful degradation - don't crash if MongoDB fails

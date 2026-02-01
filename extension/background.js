@@ -89,6 +89,37 @@ async function handleScoutSignal(signal, sender, sendResponse) {
     keywords: signal.detectedKeywords?.length || 0
   });
 
+  // ===== Skip localhost URLs =====
+  try {
+    const url = new URL(signal.url);
+    const isLocalhost = url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.endsWith('.local');
+
+    if (isLocalhost) {
+      console.log('[Guardian AI Background] ⏭️ Skipping localhost URL:', signal.url);
+      // Set safe badge for localhost
+      chrome.action.setBadgeText({ text: '✓', tabId: tabId || null });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981', tabId: tabId || null });
+
+      // Store minimal state for popup
+      if (tabId != null) {
+        tabState.set(tabId, {
+          url: signal.url,
+          riskScore: 0,
+          hasPrivacyPolicy: false,
+          skippedReason: 'localhost'
+        });
+      }
+
+      return; // Exit early, don't scan
+    }
+  } catch (e) {
+    // Invalid URL, continue with scan anyway
+    console.log('[Guardian AI Background] ⚠️ Could not parse URL, scanning anyway:', signal.url);
+  }
+  // ===== END localhost check =====
+
   setBadgeScanning(tabId);
 
   try {
@@ -241,16 +272,20 @@ async function checkLinkSafety(url) {
       detectedMalware: []
     });
 
-    const risk = result.riskScore || 0;
-    let reason = 'Domain appears safe';
+    const riskScore = result.riskScore || 0;
+    let status = 'safe';
 
-    if (risk > 70) {
-      reason = 'Suspicious domain detected';
-    } else if (risk >= 40) {
-      reason = 'Exercise caution with this link';
+    if (riskScore > 70) {
+      status = 'dangerous';
+    } else if (riskScore >= 40) {
+      status = 'suspicious';
     }
 
-    const response = { risk, reason };
+    const response = {
+      riskScore,
+      status,
+      reason: result.explanation || (status === 'safe' ? 'Domain appears safe' : 'Suspicious indicators detected')
+    };
 
     // Cache result
     linkSafetyCache.set(url, {
@@ -260,7 +295,7 @@ async function checkLinkSafety(url) {
 
     return response;
   } catch (error) {
-    return { risk: 0, reason: 'Unable to check link' };
+    return { riskScore: 0, status: 'unknown', reason: 'Unable to check link' };
   }
 }
 

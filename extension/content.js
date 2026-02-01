@@ -88,6 +88,23 @@
    */
   function sendScoutSignal() {
     const keywords = getDetectedKeywords();
+
+    // ===== Skip localhost URLs =====
+    try {
+      const url = new URL(window.location.href);
+      const isLocalhost = url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1' ||
+        url.hostname.endsWith('.local');
+
+      if (isLocalhost) {
+        console.log('[Guardian AI Content] ⏭️ Skipping localhost URL scan');
+        return; // Don't send signal for localhost
+      }
+    } catch (e) {
+      // Invalid URL, continue with scan
+    }
+    // ===== END localhost check =====
+
     const payload = {
       action: 'SCOUT_SIGNAL',
       url: window.location.href,
@@ -242,6 +259,20 @@
 
     const href = link.getAttribute('href');
     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+    // ===== Skip localhost URLs =====
+    try {
+      const absoluteUrl = new URL(href, window.location.href).href;
+      const url = new URL(absoluteUrl);
+      const isLocalhost = url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1' ||
+        url.hostname.endsWith('.local');
+
+      if (isLocalhost) return; // Don't show tooltip for localhost
+    } catch (e) {
+      // Invalid URL, ignore
+    }
+    // ===== END localhost check =====
 
     // Clear any pending hover timeout
     if (hoverTimeout) {

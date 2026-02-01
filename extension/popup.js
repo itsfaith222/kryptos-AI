@@ -308,6 +308,25 @@ async function loadCurrentPageStatus() {
     const hostname = tab.url ? new URL(tab.url).hostname : 'Unknown';
     currentPageEl.textContent = `Current page: ${hostname}`;
 
+    // ===== Skip localhost URLs =====
+    if (tab.url) {
+      try {
+        const url = new URL(tab.url);
+        const isLocalhost = url.hostname === 'localhost' ||
+          url.hostname === '127.0.0.1' ||
+          url.hostname.endsWith('.local');
+
+        if (isLocalhost) {
+          pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Localhost URL - No scan needed</div>';
+          privacyNotice.style.display = 'none';
+          return; // Exit early
+        }
+      } catch (e) {
+        // Invalid URL, continue
+      }
+    }
+    // ===== END localhost check =====
+
     const tabState = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ action: 'getTabState', tabId: tab.id }, (r) => {
         resolve(r != null ? r : null);
