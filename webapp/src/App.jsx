@@ -1,83 +1,315 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { APP_NAME } from './config'
+import { ToastProvider, useToast } from './components/Toasts'
+import { useWebSocket } from './hooks/useWebSocket'
 
 const API_BASE = import.meta.env.DEV ? '' : 'http://localhost:8000'
 
-export default function App() {
-  useEffect(() => {
-    document.title = APP_NAME ? `${APP_NAME} Dashboard` : 'Dashboard'
-  }, [])
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+function RiskBadge({ score }) {
+  const s = score ?? 0
+  if (s >= 70) return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/50">High</span>
+  if (s >= 40) return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-500/20 text-amber-400 border border-amber-500/50">Medium</span>
+  return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/50">Low</span>
+}
 
-  async function runTestScan() {
+function HistoryPanel({ history, onNewScan }) {
+  useWebSocket((payload) => {
+    onNewScan(payload)
+  })
+
+  if (!history?.length) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-500 text-sm p-6 text-center">
+        <svg className="w-12 h-12 mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p>No alerts yet</p>
+        <p className="text-xs mt-1">Scans from the extension will appear here</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3 overflow-y-auto p-4">
+      {history.map((alert) => (
+        <AlertCard key={alert.scanId || alert.timestamp + alert.url} alert={alert} />
+      ))}
+    </div>
+  )
+}
+
+function formatAlertTime(isoString) {
+  if (!isoString) return '—'
+  try {
+    // Backend sends UTC ISO without 'Z'; JS parses that as local time. Treat as UTC.
+    const s = String(isoString).trim()
+    const hasZone = /Z$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)
+    const utc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !hasZone
+      ? s.replace(/\.\d+$/, '') + 'Z'
+      : isoString
+    const d = new Date(utc)
+    if (Number.isNaN(d.getTime())) return isoString
+    const now = new Date()
+    const diffMs = now - d
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+    if (diffMs < 0) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins} min ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined, hour: '2-digit', minute: '2-digit' })
+  } catch (_) {
+    return isoString
+  }
+}
+
+function AlertCard({ alert }) {
+  const risk = alert.riskScore ?? 0
+  const voiceAlert = alert.voiceAlert
+  const hasVoice = Boolean(voiceAlert)
+  const audioSrc = hasVoice
+    ? voiceAlert.startsWith('audio/mpeg;base64,')
+      ? voiceAlert
+      : `${API_BASE}/audio/${voiceAlert}`
+    : null
+
+  let hostname = alert.scanType || '—'
+  try {
+    if (alert.url) hostname = new URL(alert.url).hostname
+  } catch (_) {}
+
+  return (
+    <div className="rounded-xl border border-slate-700/80 bg-slate-800/40 p-4 hover:border-slate-600/80 transition">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div>
+          <p className="text-slate-300 text-sm font-medium truncate max-w-[180px]" title={alert.url || '—'}>
+            {hostname}
+          </p>
+          <p className="text-slate-500 text-xs">{alert.threatType || 'unknown'}</p>
+          <p className="text-slate-600 text-xs mt-0.5" title={alert.timestamp || ''}>
+            {formatAlertTime(alert.timestamp)}
+          </p>
+        </div>
+        <RiskBadge score={risk} />
+      </div>
+      {alert.explanation && (
+        <p className="text-slate-400 text-xs line-clamp-2 mb-2">{alert.explanation}</p>
+      )}
+      {hasVoice && audioSrc && (
+        <audio
+          controls
+          src={audioSrc}
+          className="w-full h-8 mt-2"
+          preload="metadata"
+        />
+      )}
+    </div>
+  )
+}
+
+function EducatorChat({ addToast, lastScanResult }) {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [age, setAge] = useState('') // optional: for age-aware Educator (Person C)
+  const [loading, setLoading] = useState(false)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  async function sendMessage(e) {
+    e?.preventDefault()
+    const text = input.trim()
+    if (!text || loading) return
+
+    const userMsg = { role: 'user', content: text }
+    setMessages((m) => [...m, userMsg])
+    setInput('')
     setLoading(true)
-    setError(null)
-    setResult(null)
+
+    const body = { message: text }
+    if (age != null && Number.isInteger(age) && age >= 0 && age <= 120) body.age = age
+    if (lastScanResult != null && typeof lastScanResult === 'object') body.last_scan_result = lastScanResult
+
     try {
-      const res = await fetch(`${API_BASE}/scan`, {
+      const res = await fetch(`${API_BASE}/educator/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: 'https://example.com',
-          scanType: 'email',
-          content: 'Urgent: Verify your account now!',
-        }),
+        body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error(res.statusText)
-      const data = await res.json()
-      setResult(data)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        addToast(data.detail || 'Educator unavailable', 'error')
+        setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, I could not respond. Please try again.' }])
+        return
+      }
+      setMessages((m) => [...m, { role: 'assistant', content: data.reply || '' }])
     } catch (err) {
-      setError(err.message)
+      addToast(err.message || 'Request failed', 'error')
+      setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }])
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold text-emerald-400">{APP_NAME} Dashboard</h1>
-        <p className="text-slate-400">Mock scan results – Hour 2 milestone</p>
-      </header>
-
-      <button
-        onClick={runTestScan}
-        disabled={loading}
-        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 rounded font-medium"
-      >
-        {loading ? 'Scanning...' : 'Run Test Scan'}
-      </button>
-
-      {error && (
-        <div className="mt-4 p-4 bg-red-900/50 border border-red-500 rounded text-red-200">
-          Error: {error}. Is the backend running on port 8000?
-        </div>
-      )}
-
-      {result && (
-        <div className="mt-6 p-4 bg-slate-800 rounded border border-slate-600 max-w-2xl">
-          <h2 className="text-lg font-semibold text-emerald-400 mb-2">Scan Result</h2>
-          <dl className="grid gap-2 text-sm">
-            <div><dt className="text-slate-500">scanId</dt><dd>{result.scanId}</dd></div>
-            <div><dt className="text-slate-500">url</dt><dd>{result.url}</dd></div>
-            <div><dt className="text-slate-500">scanType</dt><dd>{result.scanType}</dd></div>
-            <div><dt className="text-slate-500">riskScore</dt><dd className="text-amber-400">{result.riskScore}%</dd></div>
-            <div><dt className="text-slate-500">threatType</dt><dd>{result.threatType}</dd></div>
-            <div><dt className="text-slate-500">confidence</dt><dd>{(result.confidence * 100).toFixed(0)}%</dd></div>
-            <div><dt className="text-slate-500">explanation</dt><dd className="text-slate-300">{result.explanation}</dd></div>
-            <div>
-              <dt className="text-slate-500">nextSteps</dt>
-              <dd><ul className="list-disc list-inside text-slate-300">{result.nextSteps?.map((s, i) => <li key={i}>{s}</li>)}</ul></dd>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center text-slate-500 text-sm py-8">
+            <p>Ask the Educator about security and privacy.</p>
+            <p className="text-xs mt-1">e.g. &quot;How do I spot a phishing email?&quot;</p>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
+                msg.role === 'user'
+                  ? 'bg-emerald-600/30 text-emerald-100 border border-emerald-500/30'
+                  : 'bg-slate-700/60 text-slate-200 border border-slate-600/50'
+              }`}
+            >
+              {msg.content}
             </div>
-            <div>
-              <dt className="text-slate-500">mitreAttackTechniques</dt>
-              <dd className="text-rose-400">{result.mitreAttackTechniques?.join(', ')}</dd>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="rounded-xl px-4 py-2.5 bg-slate-700/60 text-slate-400 text-sm animate-pulse">
+              Thinking...
             </div>
-          </dl>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <form onSubmit={sendMessage} className="p-4 border-t border-slate-700/80 space-y-2">
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about security or privacy..."
+            className="flex-1 px-4 py-2.5 rounded-lg bg-slate-800/80 border border-slate-600/80 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium transition"
+          >
+            Send
+          </button>
         </div>
-      )}
+      </form>
     </div>
+  )
+}
+
+function Dashboard() {
+  useEffect(() => {
+    document.title = APP_NAME ? `${APP_NAME} Dashboard` : 'Guardian AI Dashboard'
+  }, [])
+  const [history, setHistory] = useState([])
+  const [loading, setLoading] = useState(true)
+  const { addToast } = useToast()
+
+  useEffect(() => {
+    async function fetchHistory() {
+      try {
+        const res = await fetch(`${API_BASE}/history`)
+        const data = await res.json().catch(() => [])
+        setHistory(Array.isArray(data) ? data : [])
+      } catch {
+        setHistory([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchHistory()
+  }, [])
+
+  function onNewScan(payload) {
+    setHistory((prev) => [payload, ...prev].slice(0, 100))
+    const risk = payload?.riskScore ?? 0
+    addToast(`New scan: risk ${risk}/100 · ${payload?.threatType || 'unknown'}`, 'success')
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+      <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-white">{APP_NAME || 'Guardian AI'}</h1>
+                <p className="text-xs text-slate-500">Dashboard</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Live
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-3.5rem)]">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0">
+          {/* History — left */}
+          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/30 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-700/80">
+              <h2 className="text-base font-semibold text-white">Alert history</h2>
+              <p className="text-slate-500 text-xs mt-0.5">Scans from extension · educator voice when available</p>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {loading ? (
+                <div className="flex items-center justify-center h-32">
+                  <svg className="animate-spin h-8 w-8 text-emerald-500" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              ) : (
+                <HistoryPanel history={history} onNewScan={onNewScan} />
+              )}
+            </div>
+          </div>
+
+          {/* Educator chat — right */}
+          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/30 flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-700/80">
+              <h2 className="text-base font-semibold text-white">Educator chat</h2>
+              <p className="text-slate-500 text-xs mt-0.5">Ask about security, privacy, phishing &amp; scams</p>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <EducatorChat
+                addToast={addToast}
+                lastScanResult={history[0] ?? null}
+              />
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <Dashboard />
+    </ToastProvider>
   )
 }
