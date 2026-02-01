@@ -99,6 +99,9 @@ function AlertCard({ alert, onDismiss }) {
   } catch (_) {}
 
   const detailUrl = alert.scanId ? `/scan/${alert.scanId}` : null
+  const imageSrc = alert.image_data
+    ? (String(alert.image_data).startsWith('data:') ? alert.image_data : `data:image/png;base64,${alert.image_data}`)
+    : null
 
   return (
     <div className="rounded-xl border border-slate-700/80 bg-slate-800/50 p-4 hover:border-slate-600 transition relative group">
@@ -129,6 +132,17 @@ function AlertCard({ alert, onDismiss }) {
       </div>
       {alert.explanation && (
         <p className="text-slate-400 text-xs line-clamp-2 mb-2">{alert.explanation}</p>
+      )}
+      {imageSrc && (
+        <div className="mt-2 rounded-lg overflow-hidden border border-slate-600/80 bg-slate-800/80 max-h-24 w-full">
+          {detailUrl ? (
+            <a href={detailUrl}>
+              <img src={imageSrc} alt="Scanned content" className="w-full h-24 object-cover object-top" />
+            </a>
+          ) : (
+            <img src={imageSrc} alt="Scanned content" className="w-full h-24 object-cover object-top" />
+          )}
+        </div>
       )}
       {hasVoice && audioSrc && (
         <audio
@@ -331,6 +345,10 @@ function ScanDetailPage({ scanId }) {
     if (scan.url) urlHost = new URL(scan.url).hostname
   } catch (_) {}
 
+  const scanImageSrc = scan.image_data
+    ? (String(scan.image_data).startsWith('data:') ? scan.image_data : `data:image/png;base64,${scan.image_data}`)
+    : null
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
@@ -352,6 +370,14 @@ function ScanDetailPage({ scanId }) {
             </a>
           )}
         </div>
+        {scanImageSrc && (
+          <section className="mb-6">
+            <h2 className="text-sm font-semibold text-slate-400 mb-2">Scanned image</h2>
+            <div className="rounded-xl overflow-hidden border border-slate-700/80 bg-slate-800/50 max-w-2xl">
+              <img src={scanImageSrc} alt="Scanned content" className="w-full max-h-[70vh] object-contain" />
+            </div>
+          </section>
+        )}
         {scan.explanation && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-slate-400 mb-2">Explanation</h2>

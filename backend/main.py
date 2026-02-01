@@ -193,6 +193,7 @@ def _assemble_scan_result(
         nextSteps=educator_result.nextSteps,
         mitreAttackTechniques=analyst_result.mitreAttackTechniques or [],
         voiceAlert=educator_result.voiceAlert,
+        image_data=input_data.image_data,
     )
 
 
