@@ -199,7 +199,7 @@ def _assemble_scan_result(
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": APP_NAME or "Kryptos-AI"}
+    return {"ok": True, "service": APP_NAME or "Scout"}
 
 
 @app.post("/educator/chat")

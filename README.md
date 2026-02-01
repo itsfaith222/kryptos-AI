@@ -33,9 +33,7 @@ python -m venv venv
 source venv/bin/activate   # Mac/Linux
 pip install -r requirements.txt
 ```
-*   Create a `.env` file in `/backend` with:
-    `OPENROUTER_API_KEY=your_key_here`
-    `MONGODB_URI=your_mongodb_uri` (Optional: defaults to localhost)
+*   Copy the example env and add your keys: `cp backend/.env.example backend/.env`, then edit `backend/.env` with your `OPENROUTER_API_KEY`, `MONGODB_URI` (optional: defaults to localhost), and any other API keys you need.
 
 ### 2. Extension Setup
 1.  Open Chrome and navigate to `chrome://extensions`.

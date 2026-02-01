@@ -698,7 +698,7 @@ function Dashboard() {
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-3">
               <a href="/" className="flex items-center gap-3">
-                <img src="/logo.png" alt="Kryptos AI" className="h-14 w-14 rounded-lg object-contain" />
+                <img src="/logo.png" alt="Scout" className="h-14 w-14 rounded-lg object-contain" />
                 <div>
                   <h1 className="text-lg font-semibold text-white">{APP_NAME || 'Kryptos-AI'}</h1>
                   <p className="text-xs text-slate-500">Dashboard</p>

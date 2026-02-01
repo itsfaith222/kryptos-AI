@@ -1,5 +1,5 @@
 /**
- * Guardian AI Scout - Background (Orchestrator)
+ * Kryptos-AI Scout - Background (Orchestrator)
  * Listens for SCOUT_SIGNAL, POSTs to backend, manages badge state machine
  */
 
@@ -147,7 +147,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
     }
   } catch (e) {
     // Invalid URL, continue with scan anyway
-    console.log('[Kryptos-AI Background] ⚠️ Could not parse URL, scanning anyway:', signal.url);
+    console.log('[Scout] ⚠️ Could not parse URL, scanning anyway:', signal.url);
   }
   // ===== END localhost check =====
 
@@ -186,7 +186,7 @@ async function handleScoutSignal(signal, sender, sendResponse) {
 
     sendResponse(result);
   } catch (err) {
-    console.error('[Kryptos-AI Background] ❌ Full scan failed for tab', tabId, err);
+    console.error('[Scout] ❌ Full scan failed for tab', tabId, err);
     setBadgeFromResult({ riskScore: 0, hasPrivacyPolicy: signal.hasPrivacyPolicy }, tabId);
     if (tabId != null) {
       tabState.set(tabId, { hasPrivacyPolicy: signal.hasPrivacyPolicy, riskScore: 0, url: signal.url });
@@ -268,7 +268,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       content: request.content || null,
       image_data: request.image_data || null
     }).then(sendResponse).catch((err) => {
-      console.error('[Kryptos-AI] Full scan failed:', err);
+      console.error('[Scout] Full scan failed:', err);
       sendResponse({ error: err.message });
     });
     return true;
