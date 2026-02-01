@@ -1,3 +1,33 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Open template–inspired component styles (buttons, motion) */
+@layer components {
+  .btn-primary-open {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-[11px] text-sm font-medium text-white transition-all duration-200;
+    background: linear-gradient(to top, theme("colors.indigo.600"), theme("colors.indigo.500"));
+    background-size: 100% 100%;
+    background-position: bottom;
+  }
+  .btn-primary-open:hover {
+    background-size: 100% 150%;
+    opacity: 0.95;
+  }
+  .btn-secondary-open {
+    @apply inline-flex items-center justify-center rounded-lg border border-gray-600/80 bg-gray-800/80 px-4 py-[11px] text-sm font-medium text-gray-200 transition-all duration-200 hover:bg-gray-700/80 hover:border-gray-500;
+  }
+  .animate-fade-up {
+    animation: fade-up 0.4s ease-out forwards;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

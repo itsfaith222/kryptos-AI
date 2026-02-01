@@ -104,7 +104,7 @@ function AlertCard({ alert, onDismiss }) {
     : null
 
   return (
-    <div className="rounded-xl border border-slate-700/80 bg-slate-800/50 p-4 hover:border-slate-600 transition relative group">
+    <div className="rounded-xl border border-slate-700/80 bg-slate-800/50 p-4 hover:border-slate-600 transition relative group animate-fade-up">
       {onDismiss && (
         <button
           type="button"
@@ -155,7 +155,7 @@ function AlertCard({ alert, onDismiss }) {
       {detailUrl && (
         <a
           href={detailUrl}
-          className="inline-block mt-2 text-xs text-emerald-400 hover:text-emerald-300"
+          className="inline-block mt-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
         >
           View full analysis →
         </a>
@@ -395,13 +395,13 @@ function EducatorChat({ addToast }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about security or privacy..."
-            className="flex-1 px-4 py-2.5 rounded-lg bg-slate-800/80 border border-slate-600/80 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+            className="flex-1 px-4 py-2.5 rounded-lg bg-slate-800/80 border border-slate-600/80 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-colors"
             disabled={loading}
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium transition"
+            className="btn-primary-open disabled:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:opacity-60 px-5"
           >
             Send
           </button>
@@ -457,7 +457,7 @@ function ScanDetailPage({ scanId }) {
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-400 mb-4">{error || 'Scan not found'}</p>
-          <a href="/" className="text-emerald-400 hover:text-emerald-300">← Back to dashboard</a>
+          <a href="/" className="text-indigo-400 hover:text-indigo-300 transition-colors">← Back to dashboard</a>
         </div>
       </div>
     )
@@ -485,7 +485,7 @@ function ScanDetailPage({ scanId }) {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2 text-slate-400 hover:text-white text-sm">
+          <a href="/" className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 text-sm transition-colors">
             <img src="/logo.png" alt="" className="h-11 w-11 rounded object-contain" />
             ← Back to dashboard
           </a>
@@ -497,7 +497,7 @@ function ScanDetailPage({ scanId }) {
           <RiskBadge score={risk} />
           <span className="text-slate-500 text-sm">{scan.threatType || 'unknown'}</span>
           {scan.url && (
-            <a href={scan.url} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline text-sm truncate max-w-[240px]">
+            <a href={scan.url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 hover:underline text-sm truncate max-w-[240px] transition-colors">
               {urlHost}
             </a>
           )}
@@ -652,7 +652,7 @@ function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 font-sans antialiased">
       <nav className="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
