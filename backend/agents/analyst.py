@@ -26,18 +26,7 @@ except ImportError:
 
 
 class AnalystAgent:
-    """The Analyst Agent - Guardian AI's Deep Investigator (Hour 6-12 Enhanced)"""
-
-    # Evidence weight configuration for Hour 6-12
-    EVIDENCE_WEIGHTS = {
-        "domain_age_critical": 0.9,
-        "domain_age_suspicious": 0.6,
-        "no_https": 0.85,
-        "password_field": 0.7,
-        "urgency_tactics": 0.75,
-        "credential_request": 0.9,
-        "privacy_violation": 0.7,
-    }
+    """The Analyst Agent - Kryptos-AI's Deep Investigator"""
 
     def __init__(self, db=None):
         """Initialize Analyst Agent with all sub-modules"""

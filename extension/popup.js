@@ -1,5 +1,5 @@
 /**
- * Guardian AI Scout - Popup (Manual Tools)
+ * Kryptos-AI Scout - Popup (Manual Tools)
  * Full pipeline: Scout → Analyst → Educator → display (paste + current page).
  * Shows "Privacy Policy Found" when content script detected one on current tab.
  */
@@ -98,8 +98,8 @@ function displayResult(container, result) {
       <div class="risk-label">Risk Score</div>
       <div class="recommendation">
         ${risk > 70 ? '🚨 High Risk - Do not proceed' :
-          risk >= 40 ? '⚠️ Medium Risk - Be cautious' :
-          '✅ Low Risk - Appears safe'}
+      risk >= 40 ? '⚠️ Medium Risk - Be cautious' :
+        '✅ Low Risk - Appears safe'}
       </div>
     </div>
   `;
@@ -128,6 +128,7 @@ analyzeBtn.addEventListener('click', async () => {
   }
 });
 
+
 if (fullScanBtn) {
   fullScanBtn.addEventListener('click', async () => {
     try {
@@ -136,19 +137,38 @@ if (fullScanBtn) {
         showStatus('No valid page to analyze', 'error');
         return;
       }
+
       fullScanBtn.disabled = true;
-      pageResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+      fullScanBtn.textContent = 'Analyzing...';
+      pageResult.innerHTML = '<div class="loading"></div> Running full analysis...';
+
+      // Run the full scan
       const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
-      displayFullResult(pageResult, result);
-      showStatus('Full analysis complete (saved to DB)', 'success');
+
+      // Open webapp with scan results
+      const WEBAPP_URL = 'http://localhost:5173'; // Vite dev server
+      const scanId = result.scanId || 'latest';
+
+      // Open webapp in new tab with scan ID
+      chrome.tabs.create({
+        url: `${WEBAPP_URL}/scan/${scanId}`,
+        active: true
+      });
+
+      // Show success message in popup
+      pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete! Opening in dashboard...</div>';
+      showStatus('Opening full analysis in dashboard', 'success');
+
     } catch (error) {
       showStatus(`Error: ${error.message}`, 'error');
       pageResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
     } finally {
       fullScanBtn.disabled = false;
+      fullScanBtn.textContent = 'Full analysis (Scout → Analyst → Educator)';
     }
   });
 }
+
 
 function showStatus(message, type = 'info') {
   statusMessage.textContent = message;
@@ -162,7 +182,123 @@ function showStatus(message, type = 'info') {
   }
 }
 
-/** On popup open: run full pipeline (Scout → Analyst → Educator) for current tab and show full result. No button click. */
+// ===== Screenshot Upload Functionality =====
+const screenshotBtn = document.getElementById('screenshot-btn');
+const screenshotInput = document.getElementById('screenshot-input');
+const screenshotPreview = document.getElementById('screenshot-preview');
+const previewImage = document.getElementById('preview-image');
+const removeScreenshotBtn = document.getElementById('remove-screenshot');
+const analyzeScreenshotBtn = document.getElementById('analyze-screenshot-btn');
+const screenshotResult = document.getElementById('screenshot-result');
+
+let currentImageData = null;
+
+// Trigger file input when button clicked
+screenshotBtn.addEventListener('click', () => {
+  screenshotInput.click();
+});
+
+// Handle file selection
+screenshotInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Validate file type
+  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    showStatus('Please select a valid image file (PNG, JPG, WEBP)', 'error');
+    return;
+  }
+
+  // Validate file size (5MB max)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (file.size > maxSize) {
+    showStatus('Image too large. Please select an image under 5MB', 'error');
+    return;
+  }
+
+  try {
+    // Read file and convert to base64
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target.result;
+      currentImageData = base64Data;
+
+      // Show preview
+      previewImage.src = base64Data;
+      screenshotPreview.style.display = 'block';
+      analyzeScreenshotBtn.style.display = 'block';
+      screenshotResult.innerHTML = '';
+
+      showStatus('Screenshot loaded. Click "Analyze Screenshot" to scan.', 'success');
+    };
+
+    reader.onerror = () => {
+      showStatus('Failed to read image file', 'error');
+    };
+
+    reader.readAsDataURL(file);
+  } catch (error) {
+    showStatus(`Error loading image: ${error.message}`, 'error');
+  }
+});
+
+// Remove screenshot
+removeScreenshotBtn.addEventListener('click', () => {
+  currentImageData = null;
+  screenshotPreview.style.display = 'none';
+  analyzeScreenshotBtn.style.display = 'none';
+  screenshotInput.value = '';
+  screenshotResult.innerHTML = '';
+  showStatus('Screenshot removed', 'info');
+});
+
+// Analyze screenshot
+analyzeScreenshotBtn.addEventListener('click', async () => {
+  if (!currentImageData) {
+    showStatus('No screenshot selected', 'error');
+    return;
+  }
+
+  analyzeScreenshotBtn.disabled = true;
+  analyzeScreenshotBtn.textContent = 'Analyzing...';
+  screenshotResult.innerHTML = '<div class="loading"></div> Opening dashboard...';
+
+  try {
+    // Open webapp first so user sees it immediately (smooth transition)
+    const webappTab = await chrome.tabs.create({
+      url: WEBAPP_URL + '/',
+      active: true
+    });
+
+    screenshotResult.innerHTML = '<div class="loading"></div> Running full analysis...';
+
+    const result = await fullScanToBackend({
+      url: '',
+      scanType: 'image',
+      content: '',
+      image_data: currentImageData
+    });
+
+    const scanId = result.scanId || 'latest';
+
+    // Navigate the open tab to the scan result
+    if (webappTab && webappTab.id) {
+      chrome.tabs.update(webappTab.id, { url: `${WEBAPP_URL}/scan/${scanId}` });
+    }
+
+    screenshotResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete!</div>';
+    showStatus('Full analysis opened in dashboard', 'success');
+  } catch (error) {
+    showStatus(`Error: ${error.message}`, 'error');
+    screenshotResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+  } finally {
+    analyzeScreenshotBtn.disabled = false;
+    analyzeScreenshotBtn.textContent = 'Analyze Screenshot';
+  }
+});
+
+/** On popup open: show last scan for this tab (from background cache). Scan runs on page load and every 5 min; we do not re-scan here. */
 async function loadCurrentPageStatus() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -176,6 +312,25 @@ async function loadCurrentPageStatus() {
     const hostname = tab.url ? new URL(tab.url).hostname : 'Unknown';
     currentPageEl.textContent = `Current page: ${hostname}`;
 
+    // ===== Skip localhost URLs =====
+    if (tab.url) {
+      try {
+        const url = new URL(tab.url);
+        const isLocalhost = url.hostname === 'localhost' ||
+          url.hostname === '127.0.0.1' ||
+          url.hostname.endsWith('.local');
+
+        if (isLocalhost) {
+          pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Localhost URL - No scan needed</div>';
+          privacyNotice.style.display = 'none';
+          return; // Exit early
+        }
+      } catch (e) {
+        // Invalid URL, continue
+      }
+    }
+    // ===== END localhost check =====
+
     const tabState = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ action: 'getTabState', tabId: tab.id }, (r) => {
         resolve(r != null ? r : null);
@@ -188,13 +343,14 @@ async function loadCurrentPageStatus() {
       privacyNotice.style.display = 'none';
     }
 
+    // Show last scan result (scan runs on page load + every 5 min in background; we don't re-scan on popup open)
     if (tab.url && tab.url.startsWith('http')) {
-      pageResult.innerHTML = '<div class="loading"></div> Running full scan (Scout → Analyst → Educator)...';
-      const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
-      if (result.error) {
-        pageResult.innerHTML = `<div class="error">❌ ${result.error}</div>`;
+      if (tabState && tabState.fullResult && !tabState.fullResult.error) {
+        displayFullResult(pageResult, tabState.fullResult);
+      } else if (tabState && tabState.skippedReason === 'localhost') {
+        pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Localhost - No scan needed</div>';
       } else {
-        displayFullResult(pageResult, result);
+        pageResult.innerHTML = '<div style="color: #94a3b8; font-size: 13px;">Scan runs when the page loads. If you just opened this tab, wait a moment and open the extension again.</div>';
       }
     } else {
       pageResult.innerHTML = '';

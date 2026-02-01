@@ -1,43 +1,60 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <div class="container">
     <!-- Header -->
     <div class="header">
-      <h1>🛡️ Guardian AI</h1>
+      <h1>🛡️ Kryptos-AI</h1>
       <span id="status-badge" class="badge badge-green">Safe</span>
     </div>
-    
+
     <!-- Current Page Status -->
     <div class="page-status">
       <p id="current-page">Analyzing current page...</p>
-      <button id="full-scan-btn" class="btn btn-secondary" style="margin-bottom: 8px;">Full analysis (Scout → Analyst → Educator)</button>
+      <button id="full-scan-btn" class="btn btn-secondary" style="margin-bottom: 8px;">🔍 View Full Analysis in
+        Dashboard</button>
       <div id="page-result" class="result-box"></div>
       <div id="privacy-notice" class="privacy-notice" style="display: none;">
         ℹ️ Privacy Policy Found on this page — Educator can summarize it.
       </div>
     </div>
-    
+
     <!-- Paste Analysis Section -->
     <div class="paste-section">
       <h3>📋 Paste Analysis</h3>
-      <textarea 
-        id="paste-input" 
-        class="input-textarea" 
-        placeholder="Paste any suspicious text: email, SMS, or privacy paragraph..."
-      ></textarea>
+      <textarea id="paste-input" class="input-textarea"
+        placeholder="Paste any suspicious text: email, SMS, or privacy paragraph..."></textarea>
       <button id="analyze-btn" class="btn btn-primary">Analyze</button>
       <div id="paste-result" class="result-box"></div>
     </div>
-    
+
+    <!-- Screenshot Upload Section -->
+    <div class="screenshot-section">
+      <h3>📸 Screenshot Analysis</h3>
+      <div class="file-input-wrapper">
+        <input type="file" id="screenshot-input" accept="image/png,image/jpeg,image/jpg,image/webp"
+          style="display: none;">
+        <button id="screenshot-btn" class="btn btn-secondary">Choose Screenshot</button>
+      </div>
+      <div id="screenshot-preview" class="screenshot-preview" style="display: none;">
+        <img id="preview-image" alt="Screenshot preview">
+        <button id="remove-screenshot" class="btn-remove">✕</button>
+      </div>
+      <button id="analyze-screenshot-btn" class="btn btn-primary" style="display: none;">Analyze Screenshot</button>
+      <div id="screenshot-result" class="result-box"></div>
+    </div>
+
     <!-- Status Messages -->
     <div id="status-message" class="status-message"></div>
   </div>
-  
+
   <script src="popup.js"></script>
 </body>
+
 </html>

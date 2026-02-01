@@ -1,8 +1,12 @@
 """
 Orchestrator - Person D: FastAPI server, /scan endpoint, agent coordination
+Hour 6-12: WebSocket real-time alerts, rate limiting (POST /scan unchanged).
 """
+import asyncio
 import logging
 import os
+import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -10,8 +14,9 @@ from uuid import uuid4
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from config import APP_NAME
 from contracts import (
@@ -24,7 +29,43 @@ from contracts import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=APP_NAME or "Guardian AI")
+app = FastAPI(title=APP_NAME or "Kryptos-AI")
+
+# --- WebSocket: broadcast new scans to dashboard clients ---
+_ws_connections: set[WebSocket] = set()
+
+
+async def broadcast_scan_result(result_dict: dict) -> None:
+    """Send new scan result to all connected WebSocket clients (dashboard)."""
+    if not _ws_connections:
+        return
+    msg = {"type": "new_scan", "payload": result_dict}
+    dead = set()
+    for ws in _ws_connections:
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead.add(ws)
+    for ws in dead:
+        _ws_connections.discard(ws)
+
+
+# --- Rate limiting: per-IP, same 503/error shape for extension ---
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
+RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+
+
+def _rate_limit_check(client_key: str) -> bool:
+    """True if allowed, False if rate limited."""
+    now = time.monotonic()
+    window_start = now - RATE_LIMIT_WINDOW_SEC
+    times = _rate_limit_store[client_key]
+    times[:] = [t for t in times if t > window_start]
+    if len(times) >= RATE_LIMIT_REQUESTS:
+        return False
+    times.append(now)
+    return True
 
 
 @app.on_event("startup")
@@ -32,7 +73,7 @@ async def startup():
     """Log MongoDB config on startup so you can verify in terminal."""
     uri = os.getenv("MONGODB_URI", "")
     has_uri = bool(uri and uri != "mongodb://localhost:27017")
-    print(f"\n[Guardian AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
+    print(f"\n[Kryptos-AI] Backend ready | MongoDB: {'configured' if has_uri else 'using localhost (set MONGODB_URI in .env for Atlas)'}\n")
 
 # CORS: allow dashboard + Chrome extension (chrome-extension://)
 _cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,chrome-extension://")
@@ -151,12 +192,141 @@ def _assemble_scan_result(
         explanation=educator_result.explanation,
         nextSteps=educator_result.nextSteps,
         mitreAttackTechniques=analyst_result.mitreAttackTechniques or [],
+        voiceAlert=educator_result.voiceAlert,
     )
 
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": APP_NAME or "Guardian AI"}
+    return {"ok": True, "service": APP_NAME or "Kryptos-AI"}
+
+
+@app.post("/educator/chat")
+async def educator_chat(request: dict):
+    """Chat with the Educator LLM — user asks security/privacy questions."""
+    import requests as req
+
+    msg = (request.get("message") or "").strip()
+    if not msg or len(msg) > 2000:
+        raise HTTPException(status_code=400, detail="Message required (max 2000 chars)")
+
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Educator not configured (OPENROUTER_API_KEY)")
+
+    system = (
+        "You are the Kryptos-AI Educator: a concise security and privacy expert. "
+        "Answer user questions about phishing, scams, malware, and privacy in 2-5 sentences. "
+        "Be direct and helpful. No fluff."
+    )
+    try:
+        r = req.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001"),
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": msg},
+                ],
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        reply = (r.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        return {"reply": reply}
+    except req.exceptions.RequestException as e:
+        logger.warning("Educator chat failed: %s", e)
+        raise HTTPException(status_code=503, detail="Educator unavailable") from e
+
+
+@app.get("/history")
+async def get_history(limit: int = 50):
+    """Get recent scan history from DB (for dashboard)."""
+    try:
+        from database import get_recent_scans
+        scans = await get_recent_scans(limit=limit)
+        # Convert ObjectId etc for JSON
+        out = []
+        from bson import ObjectId
+
+        def _serialize(obj):
+            if isinstance(obj, ObjectId):
+                return str(obj)
+            if isinstance(obj, dict):
+                return {k: _serialize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_serialize(x) for x in obj]
+            return obj
+
+        for s in scans:
+            s.pop("_id", None)
+            out.append(_serialize(s))
+        return out
+    except Exception as e:
+        logger.exception("Failed to fetch history")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/scan/{scan_id}")
+async def get_scan_by_id(scan_id: str):
+    """Get a single scan by scanId (for webapp /scan/:id page and extension 'View Full Analysis')."""
+    try:
+        from database import get_scan_by_id as db_get_scan_by_id
+        scan = await db_get_scan_by_id(scan_id)
+        if scan is None:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        from bson import ObjectId
+
+        def _serialize(obj):
+            if isinstance(obj, ObjectId):
+                return str(obj)
+            if isinstance(obj, dict):
+                return {k: _serialize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_serialize(x) for x in obj]
+            return obj
+
+        return _serialize(scan)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to fetch scan %s", scan_id)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/audio/{file_id}")
+async def get_audio(file_id: str):
+    """Stream educator voice MP3 from GridFS (Person D)."""
+    from bson import ObjectId
+    from database import get_audio as db_get_audio
+
+    try:
+        f = db_get_audio(file_id)
+        return StreamingResponse(
+            iter([f.read()]),
+            media_type="audio/mpeg",
+        )
+    except Exception as e:
+        logger.debug("Audio fetch failed: %s", e)
+        raise HTTPException(status_code=404, detail="Audio not found") from e
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """Real-time alerts: dashboard clients connect here; new scans are broadcast."""
+    await websocket.accept()
+    _ws_connections.add(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Optional: ping/pong or commands; for now just keep connection alive
+            if data.strip().lower() == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_connections.discard(websocket)
 
 
 @app.post("/api/scout/scan")
@@ -209,8 +379,14 @@ async def api_scout_scan(request: dict):
 
 
 @app.post("/scan")
-async def scan_endpoint(input_data: ScanInput):
+async def scan_endpoint(request: Request, input_data: ScanInput):
     """Full pipeline: Scout → Analyst → Educator → ScanResult → DB → client (extension/dashboard)."""
+    # Rate limiting: same 503/error shape for extension
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_limit_check(client_ip):
+        logger.warning("Rate limit exceeded for %s", client_ip)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={"error": "Rate limit exceeded"})
     try:
         scout_result = await _run_scout(input_data)
         analyst_result = await _run_analyst(scout_result)
@@ -223,6 +399,8 @@ async def scan_endpoint(input_data: ScanInput):
         except Exception as e:
             logger.exception("Could not save scan to database")
             print(f"\n[DB ERROR] {e}\n  Check MONGODB_URI in backend/.env and Atlas Network Access.\n")
+        # Real-time: broadcast to dashboard WebSocket clients
+        await broadcast_scan_result(result_dict)
         return result_dict
     except (ValueError, RuntimeError) as e:
         msg = str(e)

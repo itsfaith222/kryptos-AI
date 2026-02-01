@@ -54,4 +54,5 @@ class ScanResult(BaseModel):
     explanation: str
     nextSteps: List[str]
     mitreAttackTechniques: Optional[List[str]] = None
+    voiceAlert: Optional[str] = None  # GridFS file_id for educator MP3 audio
 
