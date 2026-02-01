@@ -164,7 +164,7 @@ function AlertCard({ alert, onDismiss }) {
   )
 }
 
-const INITIAL_EDUCATOR_MESSAGE = "Hi! To give you the best answers, how old are you? You can just type a number (e.g. 12 or 25)."
+const INITIAL_EDUCATOR_MESSAGE = "Hi! Ask me anything about security or privacy—type your question or use the mic to speak."
 
 /** Try to parse an age (1–120) from the first user message when we don't have age yet. */
 function parseAgeFromMessage(text) {
@@ -182,11 +182,89 @@ function EducatorChat({ addToast }) {
   const [userAge, setUserAge] = useState(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [playingId, setPlayingId] = useState(null)
   const bottomRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const streamRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      const chunks = []
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      recorder.onstop = async () => {
+        streamRef.current?.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+        if (chunks.length === 0) return
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+        setLoading(true)
+        try {
+          const form = new FormData()
+          form.append('file', blob, 'recording.webm')
+          const res = await fetch(`${API_BASE}/educator/speech-to-text`, { method: 'POST', body: form })
+          const data = await res.json().catch(() => ({}))
+          if (res.ok && data.text) setInput((prev) => (prev ? `${prev} ${data.text}` : data.text))
+          else addToast(data.detail || 'Could not transcribe', 'error')
+        } catch (err) {
+          addToast(err.message || 'Speech-to-text failed', 'error')
+        } finally {
+          setLoading(false)
+        }
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+    } catch (err) {
+      addToast(err.message || 'Microphone access denied', 'error')
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    setIsRecording(false)
+  }
+
+  async function playReplyTts(content, msgIndex) {
+    if (!content || playingId !== null) return
+    setPlayingId(msgIndex)
+    try {
+      const res = await fetch(`${API_BASE}/educator/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: content }),
+      })
+      if (!res.ok) {
+        addToast('Could not play voice', 'error')
+        setPlayingId(null)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => {
+        URL.revokeObjectURL(url)
+        setPlayingId(null)
+      }
+      audio.onerror = () => {
+        URL.revokeObjectURL(url)
+        setPlayingId(null)
+      }
+      await audio.play()
+    } catch (err) {
+      addToast(err.message || 'Playback failed', 'error')
+      setPlayingId(null)
+    }
+  }
 
   async function sendMessage(e) {
     e?.preventDefault()
@@ -207,12 +285,16 @@ function EducatorChat({ addToast }) {
     setInput('')
     setLoading(true)
 
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 35000)
     try {
       const res = await fetch(`${API_BASE}/educator/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, age: ageToSend ?? undefined }),
+        signal: controller.signal,
       })
+      clearTimeout(timeoutId)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         addToast(data.detail || 'Educator unavailable', 'error')
@@ -221,7 +303,9 @@ function EducatorChat({ addToast }) {
       }
       setMessages((m) => [...m, { role: 'assistant', content: data.reply || '' }])
     } catch (err) {
-      addToast(err.message || 'Request failed', 'error')
+      clearTimeout(timeoutId)
+      const isTimeout = err?.name === 'AbortError'
+      addToast(isTimeout ? 'Request timed out. Is the backend running?' : (err.message || 'Request failed'), 'error')
       setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }])
     } finally {
       setLoading(false)
@@ -234,7 +318,7 @@ function EducatorChat({ addToast }) {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} items-end gap-2`}
           >
             <div
               className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
@@ -245,6 +329,31 @@ function EducatorChat({ addToast }) {
             >
               {msg.content}
             </div>
+            {msg.role === 'assistant' && msg.content && (
+              <button
+                type="button"
+                onClick={() => playReplyTts(msg.content, i)}
+                disabled={loading || playingId !== null}
+                title="Play reply"
+                className={`shrink-0 p-2 rounded-lg border transition ${
+                  playingId === i
+                    ? 'bg-emerald-600/50 border-emerald-500/50 text-emerald-200'
+                    : 'bg-slate-700/60 border-slate-600/50 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                aria-label="Play reply"
+              >
+                {playingId === i ? (
+                  <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="4" width="4" height="16" rx="1" />
+                    <rect x="14" y="4" width="4" height="16" rx="1" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
         ))}
         {loading && (
@@ -257,7 +366,30 @@ function EducatorChat({ addToast }) {
         <div ref={bottomRef} />
       </div>
       <form onSubmit={sendMessage} className="p-4 border-t border-slate-700/80">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <button
+            type="button"
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={loading}
+            title={isRecording ? 'Stop recording' : 'Record voice'}
+            className={`shrink-0 p-2.5 rounded-lg border transition ${
+              isRecording
+                ? 'bg-red-600/30 border-red-500/50 text-red-300 hover:bg-red-600/50'
+                : 'bg-slate-700/60 border-slate-600/50 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            aria-label={isRecording ? 'Stop recording' : 'Record voice'}
+          >
+            {isRecording ? (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+              </svg>
+            )}
+          </button>
           <input
             type="text"
             value={input}
@@ -451,18 +583,32 @@ function Dashboard() {
   const { addToast } = useToast()
 
   const fetchHistory = useCallback(async () => {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
     try {
-      const res = await fetch(`${API_BASE}/history`)
+      const res = await fetch(`${API_BASE}/history`, { signal: controller.signal })
+      clearTimeout(timeoutId)
       const data = await res.json().catch(() => [])
+      if (!res.ok) {
+        addToast((data && data.detail) || 'Could not load alerts', 'error')
+        setHistory([])
+        return
+      }
       const list = Array.isArray(data) ? data : []
       const filtered = list.filter((p) => !dismissedIds.has(p.scanId))
       setHistory(sortAlertHistory(filtered))
-    } catch {
+    } catch (err) {
+      clearTimeout(timeoutId)
       setHistory([])
+      if (err?.name === 'AbortError') {
+        addToast('Alert history timed out. Is the backend running at http://localhost:8000?', 'error')
+      } else {
+        addToast('Could not load alerts. Is the backend running?', 'error')
+      }
     } finally {
       setLoading(false)
     }
-  }, [dismissedIds])
+  }, [dismissedIds, addToast])
 
   useEffect(() => {
     fetchHistory()

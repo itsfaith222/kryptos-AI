@@ -14,7 +14,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -257,6 +257,61 @@ async def educator_chat(request: dict):
     except req.exceptions.RequestException as e:
         logger.warning("Educator chat failed: %s", e)
         raise HTTPException(status_code=503, detail="Educator unavailable") from e
+
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
+
+
+@app.post("/educator/speech-to-text")
+async def educator_speech_to_text(file: UploadFile = File(...)):
+    """Transcribe audio using ElevenLabs STT (Scribe). Accepts multipart audio file."""
+    import requests as req
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="Speech-to-text not configured (ELEVENLABS_API_KEY)")
+    contents = await file.read()
+    if not contents or len(contents) > 300_000_000:  # 300MB
+        raise HTTPException(status_code=400, detail="Audio required (max 300MB)")
+    try:
+        r = req.post(
+            "https://api.elevenlabs.io/v1/speech-to-text",
+            headers={"xi-api-key": ELEVENLABS_API_KEY},
+            files={"file": (file.filename or "audio.webm", contents, file.content_type or "audio/webm")},
+            data={"model_id": os.getenv("ELEVENLABS_STT_MODEL", "scribe_v1")},
+            timeout=60,
+        )
+        r.raise_for_status()
+        data = r.json()
+        text = (data.get("text") or "").strip()
+        return {"text": text}
+    except req.exceptions.RequestException as e:
+        logger.warning("Educator STT failed: %s", e)
+        raise HTTPException(status_code=503, detail="Speech-to-text unavailable") from e
+
+
+@app.post("/educator/tts")
+async def educator_tts(request: dict):
+    """Generate speech from text using ElevenLabs TTS for educator chat replies."""
+    import requests as req
+    text = (request.get("text") or "").strip()
+    if not text or len(text) > 5000:
+        raise HTTPException(status_code=400, detail="Text required (max 5000 chars)")
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+        raise HTTPException(status_code=503, detail="TTS not configured (ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"}
+    payload = {"text": text[:4000], "model_id": "eleven_multilingual_v2"}
+    try:
+        r = req.post(url, headers=headers, json=payload, timeout=30)
+        r.raise_for_status()
+        return StreamingResponse(
+            iter([r.content]),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=educator_reply.mp3"},
+        )
+    except req.exceptions.RequestException as e:
+        logger.warning("Educator TTS failed: %s", e)
+        raise HTTPException(status_code=503, detail="TTS unavailable") from e
 
 
 @app.get("/history")
