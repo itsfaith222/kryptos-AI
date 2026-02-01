@@ -578,17 +578,27 @@ const PIN_HIGH_ALERT_MS = 60 * 60 * 1000 // 1 hour — after this, high alerts s
 function sortAlertHistory(rows) {
   if (!Array.isArray(rows) || rows.length <= 1) return rows || []
   const now = Date.now()
+  // Only one high alert can be pinned: the most recent one within the 1-hour window
+  const recentHighAlerts = rows.filter((r) => {
+    const risk = r.riskScore ?? 0
+    const ts = new Date(r.timestamp || 0).getTime()
+    return risk >= HIGH_RISK_THRESHOLD && (now - ts) < PIN_HIGH_ALERT_MS
+  })
+  const pinnedAlert =
+    recentHighAlerts.length === 0
+      ? null
+      : recentHighAlerts.reduce((best, r) =>
+          new Date(r.timestamp || 0).getTime() > new Date(best.timestamp || 0).getTime() ? r : best
+        )
+  const pinnedScanId = pinnedAlert ? pinnedAlert.scanId : null
+
   return [...rows].sort((a, b) => {
-    const riskA = a.riskScore ?? 0
-    const riskB = b.riskScore ?? 0
     const tsA = new Date(a.timestamp || 0).getTime()
     const tsB = new Date(b.timestamp || 0).getTime()
-    const recentHighA = riskA >= HIGH_RISK_THRESHOLD && (now - tsA) < PIN_HIGH_ALERT_MS
-    const recentHighB = riskB >= HIGH_RISK_THRESHOLD && (now - tsB) < PIN_HIGH_ALERT_MS
-    // High alerts stay at top only for 1 hour; after that they sort by timestamp
-    if (recentHighA && !recentHighB) return -1
-    if (!recentHighA && recentHighB) return 1
-    if (recentHighA && recentHighB) return tsB - tsA
+    const isPinnedA = a.scanId != null && a.scanId === pinnedScanId
+    const isPinnedB = b.scanId != null && b.scanId === pinnedScanId
+    if (isPinnedA && !isPinnedB) return -1
+    if (!isPinnedA && isPinnedB) return 1
     const voiceA = Boolean(a.voiceAlert)
     const voiceB = Boolean(b.voiceAlert)
     if (voiceA && !voiceB) return -1

@@ -83,6 +83,29 @@
     return false;
   }
 
+  const PAUSED_ORIGINS_KEY = 'kryptosPausedOrigins';
+
+  /**
+   * Check if scanning is paused for this site; if not, send SCOUT_SIGNAL to background.
+   */
+  function maybeSendScoutSignal() {
+    let origin;
+    try {
+      origin = new URL(window.location.href).origin;
+    } catch (e) {
+      sendScoutSignal();
+      return;
+    }
+    chrome.storage.local.get(PAUSED_ORIGINS_KEY, (data) => {
+      const origins = data[PAUSED_ORIGINS_KEY] || {};
+      if (origins[origin]) {
+        console.log('[Kryptos-AI Content] ⏸️ Scanning paused for this site');
+        return;
+      }
+      sendScoutSignal();
+    });
+  }
+
   /**
    * Build and send SCOUT_SIGNAL to background
    */
@@ -135,11 +158,11 @@
     });
   }
 
-  // Run scan on load
+  // Run scan on load (skipped if scanning paused for this site)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', sendScoutSignal);
+    document.addEventListener('DOMContentLoaded', maybeSendScoutSignal);
   } else {
-    sendScoutSignal();
+    maybeSendScoutSignal();
   }
 
   // Listen for paste: send text to background for analysis (any text, not just email)

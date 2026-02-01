@@ -15,6 +15,10 @@ const currentPageEl = document.getElementById('current-page');
 const statusMessage = document.getElementById('status-message');
 const privacyNotice = document.getElementById('privacy-notice');
 const fullScanBtn = document.getElementById('full-scan-btn');
+const pauseScanningCheckbox = document.getElementById('pause-scanning-checkbox');
+const pauseScanningRow = document.querySelector('.pause-scanning-row');
+
+const PAUSED_ORIGINS_KEY = 'kryptosPausedOrigins';
 
 /** Full pipeline: POST /scan (Scout → Analyst → Educator → DB → client) */
 async function fullScanToBackend(payload) {
@@ -300,12 +304,34 @@ async function loadCurrentPageStatus() {
     if (!tab || !tab.id) {
       currentPageEl.textContent = 'No active tab';
       privacyNotice.style.display = 'none';
+      if (pauseScanningRow) pauseScanningRow.style.display = 'none';
       pageResult.innerHTML = '';
       return;
     }
 
     const hostname = tab.url ? new URL(tab.url).hostname : 'Unknown';
     currentPageEl.textContent = `Current page: ${hostname}`;
+
+    // Show/hide "Pause scanning" only on http(s) tabs
+    if (pauseScanningRow) {
+      if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+        pauseScanningRow.style.display = 'flex';
+        let origin;
+        try {
+          origin = new URL(tab.url).origin;
+        } catch (_) {
+          origin = null;
+        }
+        if (origin) {
+          chrome.storage.local.get(PAUSED_ORIGINS_KEY, (data) => {
+            const origins = data[PAUSED_ORIGINS_KEY] || {};
+            pauseScanningCheckbox.checked = !!origins[origin];
+          });
+        }
+      } else {
+        pauseScanningRow.style.display = 'none';
+      }
+    }
 
     // ===== Skip localhost URLs =====
     if (tab.url) {
@@ -358,8 +384,30 @@ async function loadCurrentPageStatus() {
   }
 }
 
+/** Toggle pause scanning for current tab's origin */
+async function onPauseScanningChange() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url || (!tab.url.startsWith('http://') && !tab.url.startsWith('https://'))) return;
+    const origin = new URL(tab.url).origin;
+    const data = await chrome.storage.local.get(PAUSED_ORIGINS_KEY);
+    const origins = { ...(data[PAUSED_ORIGINS_KEY] || {}) };
+    if (pauseScanningCheckbox.checked) {
+      origins[origin] = true;
+    } else {
+      delete origins[origin];
+    }
+    await chrome.storage.local.set({ [PAUSED_ORIGINS_KEY]: origins });
+  } catch (err) {
+    console.warn('[Kryptos-AI] Pause toggle failed:', err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const logo = document.getElementById('popup-logo');
   if (logo) logo.src = chrome.runtime.getURL('icons/logo.png');
+  if (pauseScanningCheckbox) {
+    pauseScanningCheckbox.addEventListener('change', onPauseScanningChange);
+  }
   loadCurrentPageStatus();
 });

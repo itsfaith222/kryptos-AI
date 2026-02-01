@@ -151,6 +151,28 @@ async function handleScoutSignal(signal, sender, sendResponse) {
   }
   // ===== END localhost check =====
 
+  // ===== Skip if scanning paused for this site =====
+  try {
+    const url = new URL(signal.url || '');
+    const origin = url.origin;
+    const { kryptosPausedOrigins = {} } = await chrome.storage.local.get('kryptosPausedOrigins');
+    if (kryptosPausedOrigins[origin]) {
+      console.log('[Kryptos-AI Background] ⏸️ Scanning paused for', origin);
+      const p1 = chrome.action.setBadgeText({ text: '—', tabId: tabId || null });
+      if (p1 && typeof p1.catch === 'function') p1.catch(() => {});
+      const p2 = chrome.action.setBadgeBackgroundColor({ color: '#64748b', tabId: tabId || null });
+      if (p2 && typeof p2.catch === 'function') p2.catch(() => {});
+      if (tabId != null) {
+        tabState.set(tabId, { url: signal.url, riskScore: null, paused: true });
+      }
+      sendResponse({ paused: true });
+      return;
+    }
+  } catch (e) {
+    // Continue with scan if check fails
+  }
+  // ===== END pause check =====
+
   setBadgeScanning(tabId);
 
   try {
