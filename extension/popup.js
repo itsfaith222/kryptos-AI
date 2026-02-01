@@ -98,8 +98,8 @@ function displayResult(container, result) {
       <div class="risk-label">Risk Score</div>
       <div class="recommendation">
         ${risk > 70 ? '🚨 High Risk - Do not proceed' :
-          risk >= 40 ? '⚠️ Medium Risk - Be cautious' :
-          '✅ Low Risk - Appears safe'}
+      risk >= 40 ? '⚠️ Medium Risk - Be cautious' :
+        '✅ Low Risk - Appears safe'}
       </div>
     </div>
   `;
@@ -128,6 +128,7 @@ analyzeBtn.addEventListener('click', async () => {
   }
 });
 
+
 if (fullScanBtn) {
   fullScanBtn.addEventListener('click', async () => {
     try {
@@ -136,19 +137,38 @@ if (fullScanBtn) {
         showStatus('No valid page to analyze', 'error');
         return;
       }
+
       fullScanBtn.disabled = true;
-      pageResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+      fullScanBtn.textContent = 'Analyzing...';
+      pageResult.innerHTML = '<div class="loading"></div> Running full analysis...';
+
+      // Run the full scan
       const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
-      displayFullResult(pageResult, result);
-      showStatus('Full analysis complete (saved to DB)', 'success');
+
+      // Open webapp with scan results
+      const WEBAPP_URL = 'http://localhost:3000'; // Update this to your webapp URL
+      const scanId = result.scanId || 'latest';
+
+      // Open webapp in new tab with scan ID
+      chrome.tabs.create({
+        url: `${WEBAPP_URL}/scan/${scanId}`,
+        active: true
+      });
+
+      // Show success message in popup
+      pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete! Opening in dashboard...</div>';
+      showStatus('Opening full analysis in dashboard', 'success');
+
     } catch (error) {
       showStatus(`Error: ${error.message}`, 'error');
       pageResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
     } finally {
       fullScanBtn.disabled = false;
+      fullScanBtn.textContent = 'Full analysis (Scout → Analyst → Educator)';
     }
   });
 }
+
 
 function showStatus(message, type = 'info') {
   statusMessage.textContent = message;
@@ -209,7 +229,7 @@ screenshotInput.addEventListener('change', async (e) => {
       screenshotPreview.style.display = 'block';
       analyzeScreenshotBtn.style.display = 'block';
       screenshotResult.innerHTML = '';
-      
+
       showStatus('Screenshot loaded. Click "Analyze Screenshot" to scan.', 'success');
     };
 
@@ -242,7 +262,7 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
 
   analyzeScreenshotBtn.disabled = true;
   analyzeScreenshotBtn.textContent = 'Analyzing...';
-  screenshotResult.innerHTML = '<div class="loading"></div> Full pipeline (Scout → Analyst → Educator)...';
+  screenshotResult.innerHTML = '<div class="loading"></div> Running full analysis...';
 
   try {
     const result = await fullScanToBackend({
@@ -252,8 +272,19 @@ analyzeScreenshotBtn.addEventListener('click', async () => {
       image_data: currentImageData
     });
 
-    displayFullResult(screenshotResult, result);
-    showStatus('Screenshot analysis complete (saved to DB)', 'success');
+    // Open webapp with scan results
+    const WEBAPP_URL = 'http://localhost:3000'; // Update this to your webapp URL
+    const scanId = result.scanId || 'latest';
+
+    // Open webapp in new tab with scan ID
+    chrome.tabs.create({
+      url: `${WEBAPP_URL}/scan/${scanId}`,
+      active: true
+    });
+
+    // Show success message in popup
+    screenshotResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete! Opening in dashboard...</div>';
+    showStatus('Opening full analysis in dashboard', 'success');
   } catch (error) {
     showStatus(`Error: ${error.message}`, 'error');
     screenshotResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
