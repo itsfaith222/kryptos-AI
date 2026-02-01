@@ -1,6 +1,6 @@
 """
 analyst.py
-GUARDIAN AI - ANALYST AGENT (Hour 6-12 Enhanced)
+Kryptos-AI - ANALYST AGENT (Hour 6-12 Enhanced)
 Person B's Main Hub
 """
 
@@ -196,16 +196,18 @@ class AnalystAgent:
         return final_risk, confidence
 
     def _determine_threat_type(self, ai_threat_type: str, privacy_analysis, risk_score: int) -> str:
-        """Determine final threat type"""
+        """Determine final threat type. Returns only contract-allowed: phishing | scam | malware | privacy_violation."""
         if privacy_analysis and privacy_analysis.get('privacyScore', 0) > 70:
             return "privacy_violation"
-        if ai_threat_type in ['phishing', 'scam', 'malware', 'social_engineering']:
+        if ai_threat_type in ['phishing', 'scam', 'malware']:
             return ai_threat_type
+        if ai_threat_type in ['social_engineering', 'suspicious']:
+            return 'phishing'
         if risk_score > 70:
             return 'phishing'
         elif risk_score > 40:
-            return 'suspicious'
-        return 'benign'
+            return 'phishing'  # suspicious band; riskScore differentiates severity
+        return 'phishing'  # benign; low riskScore indicates low threat
 
 
 # ==========================================
@@ -332,7 +334,7 @@ async def investigate(scout_result: ScoutOutput) -> AnalystOutput:
     # Return AnalystOutput - DO NOT CHANGE STRUCTURE
     return AnalystOutput(
         analysisId=result.get("analysisId", str(uuid.uuid4())),
-        threatType=result.get("threatType", "unknown"),
+        threatType=result.get("threatType", "phishing"),  # contract: phishing | scam | malware | privacy_violation
         riskScore=result.get("riskScore", 0),
         confidence=result.get("confidence", 0.5),
         evidence=evidence,

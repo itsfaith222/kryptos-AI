@@ -1,6 +1,6 @@
 """
 whois_checker.py
-GUARDIAN AI - WHOIS Domain Checker (Hour 6-12 Enhanced)
+Kryptos-AI - WHOIS Domain Checker (Hour 6-12 Enhanced)
 """
 
 from datetime import datetime, timezone

@@ -426,12 +426,12 @@ Extract ALL visible text including URLs and phone numbers. Respond with JSON onl
             # Query for scans from last 60 minutes
             sixty_minutes_ago = datetime.utcnow() - timedelta(minutes=60)
             
-            # Aggregate to find most frequent threatTypes
+            # Aggregate to find most frequent threatTypes (contract has no "safe"; use riskScore)
             pipeline = [
                 {
                     "$match": {
                         "timestamp": {"$gte": sixty_minutes_ago.isoformat()},
-                        "threatType": {"$ne": "safe"}  # Exclude safe scans
+                        "riskScore": {"$gte": 50}  # Exclude low-risk scans
                     }
                 },
                 {

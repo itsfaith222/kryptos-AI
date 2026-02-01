@@ -1,6 +1,6 @@
 """
 mitre_mapper.py
-GUARDIAN AI - MITRE ATT&CK Framework Mapper (Hour 6-12 Enhanced)
+Kryptos-AI - MITRE ATT&CK Framework Mapper (Hour 6-12 Enhanced)
 Expanded technique database
 """
 

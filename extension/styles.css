@@ -12,10 +12,24 @@ body {
   padding: 16px;
 }
 
+/* Small centered logo at top (web app logo) */
+.popup-logo-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-top: 4px;
+}
+.popup-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
 /* Header */
 .header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 16px;
   border-bottom: 2px solid #e5e7eb;

@@ -7,18 +7,20 @@
 </head>
 
 <body>
-  <div class="container">
+  <div id="main-content" class="container">
+    <!-- Small centered logo at top -->
+    <div class="popup-logo-wrap">
+      <img id="popup-logo" src="" alt="Kryptos AI" class="popup-logo">
+    </div>
     <!-- Header -->
     <div class="header">
-      <h1>🛡️ Kryptos-AI</h1>
       <span id="status-badge" class="badge badge-green">Safe</span>
     </div>
 
     <!-- Current Page Status -->
     <div class="page-status">
       <p id="current-page">Analyzing current page...</p>
-      <button id="full-scan-btn" class="btn btn-secondary" style="margin-bottom: 8px;">🔍 View Full Analysis in
-        Dashboard</button>
+      <button id="full-scan-btn" class="btn btn-secondary" style="margin-bottom: 8px;">Open Dashboard</button>
       <div id="page-result" class="result-box"></div>
       <div id="privacy-notice" class="privacy-notice" style="display: none;">
         ℹ️ Privacy Policy Found on this page — Educator can summarize it.

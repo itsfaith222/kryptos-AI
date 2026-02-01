@@ -1,6 +1,6 @@
 """
 gemini_analyzer.py
-GUARDIAN AI - Gemini AI Analyzer (Hour 6-12 Enhanced)
+Kryptos-AI - Gemini AI Analyzer (Hour 6-12 Enhanced)
 Optimized prompts, privacy policy analysis
 """
 

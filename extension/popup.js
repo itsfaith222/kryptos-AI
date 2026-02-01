@@ -5,6 +5,7 @@
  */
 
 const BACKEND_URL = 'http://localhost:8000';
+const WEBAPP_URL = 'http://localhost:5173';
 
 const pasteInput = document.getElementById('paste-input');
 const analyzeBtn = document.getElementById('analyze-btn');
@@ -133,38 +134,24 @@ if (fullScanBtn) {
   fullScanBtn.addEventListener('click', async () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.url || !tab.url.startsWith('http')) {
-        showStatus('No valid page to analyze', 'error');
+      if (!tab || !tab.id) {
+        showStatus('No active tab', 'error');
         return;
       }
 
-      fullScanBtn.disabled = true;
-      fullScanBtn.textContent = 'Analyzing...';
-      pageResult.innerHTML = '<div class="loading"></div> Running full analysis...';
-
-      // Run the full scan
-      const result = await fullScanToBackend({ url: tab.url, scanType: 'page', content: '' });
-
-      // Open webapp with scan results
-      const WEBAPP_URL = 'http://localhost:5173'; // Vite dev server
-      const scanId = result.scanId || 'latest';
-
-      // Open webapp in new tab with scan ID
-      chrome.tabs.create({
-        url: `${WEBAPP_URL}/scan/${scanId}`,
-        active: true
+      // Use already-stored scan for this tab (no new scan). Open dashboard immediately.
+      const tabState = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'getTabState', tabId: tab.id }, (r) => resolve(r != null ? r : null));
       });
+      const scanId = tabState?.fullResult?.scanId;
+      const url = scanId
+        ? `${WEBAPP_URL}/scan/${scanId}`
+        : WEBAPP_URL;
 
-      // Show success message in popup
-      pageResult.innerHTML = '<div style="color: #10b981; font-size: 13px;">✅ Analysis complete! Opening in dashboard...</div>';
-      showStatus('Opening full analysis in dashboard', 'success');
-
+      chrome.tabs.create({ url, active: true });
+      showStatus('Opening dashboard…', 'success');
     } catch (error) {
       showStatus(`Error: ${error.message}`, 'error');
-      pageResult.innerHTML = `<div class="error">❌ ${error.message}</div>`;
-    } finally {
-      fullScanBtn.disabled = false;
-      fullScanBtn.textContent = 'Full analysis (Scout → Analyst → Educator)';
     }
   });
 }
@@ -362,4 +349,8 @@ async function loadCurrentPageStatus() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', loadCurrentPageStatus);
+document.addEventListener('DOMContentLoaded', () => {
+  const logo = document.getElementById('popup-logo');
+  if (logo) logo.src = chrome.runtime.getURL('icons/logo.png');
+  loadCurrentPageStatus();
+});
