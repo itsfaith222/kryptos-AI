@@ -1,4 +1,4 @@
-# Kryptos-AI - Guardian AI security assistant
+# Kryptos-AI - Security assistant
 
 Kryptos-AI is a powerful, multi-agent security pipeline designed to protect users from phishing, scams, and digital threats in real-time. It combines a Chrome extension for immediate detection, a sophisticated multi-agent backend for deep analysis, and a modern dashboard for comprehensive reporting.
 
