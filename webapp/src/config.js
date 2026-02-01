@@ -1,6 +1,4 @@
 /**
- * App config - change appName in app.config.json (project root) to rebrand.
+ * App name - change here to rebrand.
  */
-import appConfig from '../../app.config.json'
-
-export const APP_NAME = appConfig.appName || ''
+export const APP_NAME = 'Kryptos-AI'
